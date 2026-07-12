@@ -4,9 +4,9 @@ namespace DeployTool;
 
 public partial class App : Application
 {
-    // Production default. Override for local testing with DEPLOYTOOL_SHARE_ROOT
-    // (or a first command-line argument), e.g. "S:\deploy map".
-    private const string DefaultShareRoot = @"\\fileserver\PCSetup";
+    // Production default. Override with DEPLOYTOOL_SHARE_ROOT (or a first command-line argument)
+    // for local testing, e.g. "S:\deploy map".
+    private const string DefaultShareRoot = @"\\192.168.0.24\Sabbe\deploy map";
 
     protected override void OnStartup(StartupEventArgs e)
     {
