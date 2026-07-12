@@ -10,7 +10,7 @@ Console.WriteLine("Fileserver connectie OK.");
 
 var metadataStore = new InstallerMetadataStore(layout);
 var installerCatalog = new InstallerCatalogService(layout, metadataStore);
-var shortcutStore = new ShortcutStore(layout);
+var shortcutCatalog = new ShortcutCatalogService(layout);
 var settingsCatalog = new SettingsCatalogService();
 
 var installers = await installerCatalog.DiscoverAsync();
@@ -18,10 +18,10 @@ Console.WriteLine($"\nGevonden installers ({installers.Count}):");
 foreach (var i in installers)
     Console.WriteLine($"  [{(i.IsConfigured ? "OK" : "NOG TE CONFIGUREREN")}] {i.FileName} -> \"{i.DisplayName}\" args=\"{i.SilentArgs}\" default={i.DefaultSelected}");
 
-var shortcuts = await shortcutStore.LoadAsync();
+var shortcuts = await shortcutCatalog.DiscoverAsync();
 Console.WriteLine($"\nSnelkoppelingen ({shortcuts.Count}):");
 foreach (var s in shortcuts)
-    Console.WriteLine($"  {s.Name} -> {s.Target} default={s.DefaultSelected}");
+    Console.WriteLine($"  {s.FileName} -> \"{s.DisplayName}\"");
 
 var settings = settingsCatalog.GetAll();
 Console.WriteLine($"\nInstellingen ({settings.Count}):");
@@ -40,7 +40,7 @@ sessionItems.AddRange(installers.Where(i => i.IsConfigured).Select(i => new Sess
 sessionItems.AddRange(shortcuts.Select(s => new SessionItem
 {
     Kind = SessionItemKind.Shortcut,
-    Name = s.Name,
+    Name = s.DisplayName,
     IsSelected = true,
     Shortcut = s
 }));

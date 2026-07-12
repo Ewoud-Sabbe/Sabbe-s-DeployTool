@@ -8,7 +8,7 @@ public sealed class SessionItem
     public bool IsSelected { get; set; }
 
     public InstallerCatalogEntry? Installer { get; init; }
-    public ShortcutDefinition? Shortcut { get; init; }
+    public ShortcutCatalogEntry? Shortcut { get; init; }
     public SettingAction? Setting { get; init; }
 
     public ItemStatus Status { get; internal set; } = ItemStatus.Pending;
