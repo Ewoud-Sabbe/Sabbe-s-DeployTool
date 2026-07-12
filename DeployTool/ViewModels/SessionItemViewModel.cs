@@ -12,6 +12,8 @@ public partial class SessionItemViewModel : ObservableObject
 
     public SessionItemKind Kind => Model.Kind;
     public string Name => Model.Name;
+    public bool IsInstaller => Kind == SessionItemKind.Installer;
+    public string ConfigureButtonLabel => IsConfigured ? "Bewerken..." : "Configureren...";
 
     [ObservableProperty]
     private bool isSelected;

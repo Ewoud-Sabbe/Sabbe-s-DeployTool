@@ -14,6 +14,12 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 
     public async Task RunAsync(IReadOnlyList<SessionItem> items, IProgress<SessionItemProgress>? progress, CancellationToken ct = default)
     {
+        var selected = items.Where(i => i.IsSelected).ToList();
+        logger?.WriteLine($"Sessie gestart met {selected.Count} geselecteerde item(en) "
+            + $"({selected.Count(i => i.Kind == SessionItemKind.Installer)} software, "
+            + $"{selected.Count(i => i.Kind == SessionItemKind.Shortcut)} snelkoppeling(en), "
+            + $"{selected.Count(i => i.Kind == SessionItemKind.Setting)} instelling(en)).");
+
         foreach (var item in items.Where(i => i.Kind == SessionItemKind.Shortcut && i.IsSelected))
             await RunShortcutAsync(item, progress, ct);
 
@@ -22,16 +28,22 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 
         foreach (var item in items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected))
             await RunInstallerWithRetryAsync(item, progress, ct);
+
+        logger?.WriteLine("Sessie voltooid.");
     }
 
     /// <summary>Re-runs a single failed item, e.g. from the "opnieuw proberen" button.</summary>
-    public Task RetryAsync(SessionItem item, IProgress<SessionItemProgress>? progress, CancellationToken ct = default) => item.Kind switch
+    public Task RetryAsync(SessionItem item, IProgress<SessionItemProgress>? progress, CancellationToken ct = default)
     {
-        SessionItemKind.Installer => RunInstallerWithRetryAsync(item, progress, ct),
-        SessionItemKind.Shortcut => RunShortcutAsync(item, progress, ct),
-        SessionItemKind.Setting => RunSettingAsync(item, progress, ct),
-        _ => Task.CompletedTask
-    };
+        logger?.WriteLine($"[{item.Name}] Handmatige nieuwe poging gestart.");
+        return item.Kind switch
+        {
+            SessionItemKind.Installer => RunInstallerWithRetryAsync(item, progress, ct),
+            SessionItemKind.Shortcut => RunShortcutAsync(item, progress, ct),
+            SessionItemKind.Setting => RunSettingAsync(item, progress, ct),
+            _ => Task.CompletedTask
+        };
+    }
 
     private async Task RunInstallerWithRetryAsync(SessionItem item, IProgress<SessionItemProgress>? progress, CancellationToken ct)
     {
@@ -40,13 +52,14 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         var (success, error) = await TryInstallOnceAsync(item, ct);
         if (!success)
         {
+            logger?.WriteLine($"[{item.Name}] Eerste poging mislukt ({error}) — automatische nieuwe poging wordt gestart.");
             (success, error) = await TryInstallOnceAsync(item, ct);
         }
 
         Report(item, success ? ItemStatus.Succeeded : ItemStatus.Failed, progress, error);
     }
 
-    private static async Task<(bool Success, string? Error)> TryInstallOnceAsync(SessionItem item, CancellationToken ct)
+    private async Task<(bool Success, string? Error)> TryInstallOnceAsync(SessionItem item, CancellationToken ct)
     {
         var installer = item.Installer ?? throw new InvalidOperationException($"'{item.Name}' heeft geen installer-gegevens.");
         var tempDir = Path.Combine(Path.GetTempPath(), "PCSetup", Guid.NewGuid().ToString("N"));
@@ -55,7 +68,13 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         try
         {
             var localPath = Path.Combine(tempDir, installer.FileName);
+
+            logger?.WriteLine($"[{item.Name}] Kopiëren gestart: \"{installer.FullPath}\" -> \"{localPath}\"");
+            var copyStopwatch = Stopwatch.StartNew();
             await CopyFileAsync(installer.FullPath, localPath, ct);
+            copyStopwatch.Stop();
+            var sizeMb = new FileInfo(localPath).Length / 1024.0 / 1024.0;
+            logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
 
             var psi = new ProcessStartInfo(localPath, installer.SilentArgs)
             {
@@ -63,20 +82,28 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
                 CreateNoWindow = true,
             };
 
+            var displayArgs = string.IsNullOrWhiteSpace(installer.SilentArgs) ? "(geen argumenten)" : installer.SilentArgs;
+            logger?.WriteLine($"[{item.Name}] Installer starten: \"{localPath}\" {displayArgs}");
+            var runStopwatch = Stopwatch.StartNew();
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Kon installer niet starten.");
             await process.WaitForExitAsync(ct);
+            runStopwatch.Stop();
 
-            return SuccessExitCodes.Contains(process.ExitCode)
-                ? (true, null)
-                : (false, $"Installer gaf exitcode {process.ExitCode}");
+            var success = SuccessExitCodes.Contains(process.ExitCode);
+            logger?.WriteLine($"[{item.Name}] Installer afgesloten met exitcode {process.ExitCode} na {runStopwatch.Elapsed.TotalSeconds:N1}s "
+                + $"— {(success ? "geslaagd" : "mislukt")}.");
+
+            return success ? (true, null) : (false, $"Installer gaf exitcode {process.ExitCode}");
         }
         catch (Exception ex)
         {
+            logger?.WriteLine($"[{item.Name}] Fout tijdens installatie: {ex.Message}");
             return (false, ex.Message);
         }
         finally
         {
             TryDeleteDirectory(tempDir);
+            logger?.WriteLine($"[{item.Name}] Tijdelijke map opgeruimd: \"{tempDir}\"");
         }
     }
 
@@ -85,11 +112,15 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         Report(item, ItemStatus.Running, progress);
         try
         {
-            shortcutPlacer.Place(item.Shortcut ?? throw new InvalidOperationException($"'{item.Name}' heeft geen snelkoppeling-gegevens."));
+            var shortcut = item.Shortcut ?? throw new InvalidOperationException($"'{item.Name}' heeft geen snelkoppeling-gegevens.");
+            logger?.WriteLine($"[{item.Name}] Snelkoppeling plaatsen: \"{shortcut.FullPath}\" -> bureaublad");
+            shortcutPlacer.Place(shortcut);
+            logger?.WriteLine($"[{item.Name}] Snelkoppeling geplaatst.");
             Report(item, ItemStatus.Succeeded, progress);
         }
         catch (Exception ex)
         {
+            logger?.WriteLine($"[{item.Name}] Fout bij plaatsen snelkoppeling: {ex.Message}");
             Report(item, ItemStatus.Failed, progress, ex.Message);
         }
         return Task.CompletedTask;
@@ -101,11 +132,16 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         try
         {
             var setting = item.Setting ?? throw new InvalidOperationException($"'{item.Name}' heeft geen instelling-actie.");
+            logger?.WriteLine($"[{item.Name}] Instelling toepassen...");
+            var stopwatch = Stopwatch.StartNew();
             await setting.Execute(ct);
+            stopwatch.Stop();
+            logger?.WriteLine($"[{item.Name}] Instelling toegepast in {stopwatch.Elapsed.TotalMilliseconds:N0}ms.");
             Report(item, ItemStatus.Succeeded, progress);
         }
         catch (Exception ex)
         {
+            logger?.WriteLine($"[{item.Name}] Fout bij toepassen instelling: {ex.Message}");
             Report(item, ItemStatus.Failed, progress, ex.Message);
         }
     }

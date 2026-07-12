@@ -37,8 +37,8 @@
                                    Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}"/>
                     </StackPanel>
 
-                    <Button Grid.Column="2" Content="Configureren..." Margin="4,0" Padding="6,2"
-                            Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}"
+                    <Button Grid.Column="2" Content="{Binding ConfigureButtonLabel}" Margin="4,0" Padding="6,2"
+                            Visibility="{Binding IsInstaller, Converter={StaticResource BoolToVisibility}}"
                             Command="{Binding DataContext.ConfigureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding}"/>
 
@@ -60,6 +60,7 @@
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="200"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -86,7 +87,21 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Grid Grid.Row="1" Margin="0,12,0,0">
+        <GroupBox Grid.Row="1" Header="Live logging" Margin="0,12,0,0">
+            <ListBox x:Name="LogListBox" ItemsSource="{Binding LogLines}"
+                     FontFamily="Consolas" FontSize="11"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     HorizontalContentAlignment="Stretch">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="2,0"/>
+                        <Setter Property="MinHeight" Value="0"/>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
+        </GroupBox>
+
+        <Grid Grid.Row="2" Margin="0,12,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>

@@ -25,6 +25,9 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<SessionItemViewModel> Shortcuts { get; } = [];
     public ObservableCollection<SessionItemViewModel> Settings { get; } = [];
 
+    /// <summary>Mirrors the session log file, line for line, as it's written.</summary>
+    public ObservableCollection<string> LogLines { get; } = [];
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     private bool isLoading = true;
@@ -49,6 +52,7 @@ public partial class MainViewModel : ObservableObject
     public async Task LoadAsync()
     {
         IsLoading = true;
+        var previousSelections = AllItems.ToDictionary(GetStableKey, i => i.IsSelected);
         try
         {
             StatusMessage = "Verbinden met fileserver...";
@@ -62,11 +66,16 @@ public partial class MainViewModel : ObservableObject
             Installers.Clear();
             foreach (var entry in installerEntries)
             {
+                var key = $"installer:{entry.FileName}";
+                var isSelected = previousSelections.TryGetValue(key, out var wasSelected)
+                    ? wasSelected
+                    : entry.IsConfigured && entry.DefaultSelected;
+
                 var item = new SessionItem
                 {
                     Kind = SessionItemKind.Installer,
                     Name = entry.DisplayName,
-                    IsSelected = entry.IsConfigured && entry.DefaultSelected,
+                    IsSelected = isSelected,
                     Installer = entry
                 };
                 Installers.Add(new SessionItemViewModel(item, entry.IsConfigured));
@@ -75,11 +84,14 @@ public partial class MainViewModel : ObservableObject
             Shortcuts.Clear();
             foreach (var entry in shortcutEntries)
             {
+                var key = $"shortcut:{entry.FileName}";
+                var isSelected = previousSelections.TryGetValue(key, out var wasSelected) && wasSelected;
+
                 var item = new SessionItem
                 {
                     Kind = SessionItemKind.Shortcut,
                     Name = entry.DisplayName,
-                    IsSelected = false,
+                    IsSelected = isSelected,
                     Shortcut = entry
                 };
                 Shortcuts.Add(new SessionItemViewModel(item));
@@ -88,11 +100,16 @@ public partial class MainViewModel : ObservableObject
             Settings.Clear();
             foreach (var action in settingActions)
             {
+                var key = $"setting:{action.Name}";
+                var isSelected = previousSelections.TryGetValue(key, out var wasSelected)
+                    ? wasSelected
+                    : action.DefaultSelected;
+
                 var item = new SessionItem
                 {
                     Kind = SessionItemKind.Setting,
                     Name = action.Name,
-                    IsSelected = action.DefaultSelected,
+                    IsSelected = isSelected,
                     Setting = action
                 };
                 Settings.Add(new SessionItemViewModel(item));
@@ -110,6 +127,24 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    private static string GetStableKey(SessionItemViewModel vm) => vm.Kind switch
+    {
+        SessionItemKind.Installer => $"installer:{vm.Model.Installer!.FileName}",
+        SessionItemKind.Shortcut => $"shortcut:{vm.Model.Shortcut!.FileName}",
+        SessionItemKind.Setting => $"setting:{vm.Name}",
+        _ => vm.Name
+    };
+
+    private SessionLogger EnsureLogger()
+    {
+        if (_logger is null)
+        {
+            _logger = new SessionLogger(_layout);
+            _logger.LineWritten += line => LogLines.Add(line);
+        }
+        return _logger;
+    }
+
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task StartAsync()
     {
@@ -117,8 +152,8 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = "Bezig...";
         try
         {
-            _logger ??= new SessionLogger(_layout);
-            _engine ??= new InstallEngine(_shortcutPlacer, _logger);
+            var logger = EnsureLogger();
+            _engine ??= new InstallEngine(_shortcutPlacer, logger);
 
             var selected = AllItems.Where(i => i.IsSelected && i.IsConfigured).Select(vm => vm.Model).ToList();
             var progress = new Progress<SessionItemProgress>(OnProgress);
@@ -143,8 +178,8 @@ public partial class MainViewModel : ObservableObject
     {
         if (item is null) return;
 
-        _logger ??= new SessionLogger(_layout);
-        _engine ??= new InstallEngine(_shortcutPlacer, _logger);
+        var logger = EnsureLogger();
+        _engine ??= new InstallEngine(_shortcutPlacer, logger);
 
         var progress = new Progress<SessionItemProgress>(OnProgress);
         await _engine.RetryAsync(item.Model, progress);
