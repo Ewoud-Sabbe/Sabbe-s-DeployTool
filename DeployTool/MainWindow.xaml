@@ -1,12 +1,99 @@
-﻿<Window x:Class="DeployTool.MainWindow"
+<Window x:Class="DeployTool.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:DeployTool"
+        xmlns:vm="clr-namespace:DeployTool.ViewModels"
+        xmlns:conv="clr-namespace:DeployTool.Converters"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
-    <Grid>
+        Title="PC Voorinstallatie" Height="720" Width="900"
+        WindowStartupLocation="CenterScreen">
 
+    <Window.Resources>
+        <conv:ItemStatusToGlyphConverter x:Key="StatusToGlyph"/>
+        <conv:ItemStatusToBrushConverter x:Key="StatusToBrush"/>
+        <conv:ItemStatusToRetryVisibilityConverter x:Key="StatusToRetryVisibility"/>
+        <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+
+        <DataTemplate x:Key="ItemRowTemplate" DataType="{x:Type vm:SessionItemViewModel}">
+            <Border BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="4,6">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <CheckBox Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0"
+                              IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsConfigured}"/>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="nog te configureren" FontStyle="Italic" Foreground="DarkOrange" FontSize="11"
+                                   Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}"/>
+                    </StackPanel>
+
+                    <Button Grid.Column="2" Content="Configureren..." Margin="4,0" Padding="6,2"
+                            Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}"
+                            Command="{Binding DataContext.ConfigureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"/>
+
+                    <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="8,0"
+                               FontSize="16"
+                               Text="{Binding Status, Converter={StaticResource StatusToGlyph}}"
+                               Foreground="{Binding Status, Converter={StaticResource StatusToBrush}}"
+                               ToolTip="{Binding ErrorMessage}"/>
+
+                    <Button Grid.Column="4" Content="Opnieuw proberen" Padding="6,2"
+                            Visibility="{Binding Status, Converter={StaticResource StatusToRetryVisibility}}"
+                            Command="{Binding DataContext.RetryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock Text="{Binding StatusMessage}" FontSize="16"/>
+            </StackPanel>
+        </Grid>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
+                      Visibility="{Binding IsLoading, Converter={StaticResource InverseBoolToVisibility}}">
+            <StackPanel>
+                <GroupBox Header="Software" Margin="0,0,0,12">
+                    <ItemsControl ItemsSource="{Binding Installers}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                </GroupBox>
+
+                <GroupBox Header="Snelkoppelingen" Margin="0,0,0,12">
+                    <ItemsControl ItemsSource="{Binding Shortcuts}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                </GroupBox>
+
+                <GroupBox Header="Instellingen" Margin="0,0,0,12">
+                    <ItemsControl ItemsSource="{Binding Settings}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="Start" Width="140" Height="36" FontWeight="Bold"
+                    Command="{Binding StartCommand}"/>
+        </Grid>
     </Grid>
 </Window>
