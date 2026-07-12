@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="DeployTool.Core/DeployTool.Core.csproj" />
+  <Project Path="DeployTool.TestHarness/DeployTool.TestHarness.csproj" />
   <Project Path="DeployTool/DeployTool.csproj" />
 </Solution>
