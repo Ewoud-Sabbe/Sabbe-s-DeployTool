@@ -76,7 +76,9 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             var sizeMb = new FileInfo(localPath).Length / 1024.0 / 1024.0;
             logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
 
-            var psi = BuildProcessStartInfo(localPath, installer.SilentArgs);
+            var isMsi = Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase);
+            var msiLogPath = isMsi ? Path.Combine(tempDir, "msiexec.log") : null;
+            var psi = BuildProcessStartInfo(localPath, installer.SilentArgs, msiLogPath);
 
             logger?.WriteLine($"[{item.Name}] Installer starten: \"{psi.FileName}\" {psi.Arguments}");
             var runStopwatch = Stopwatch.StartNew();
@@ -88,7 +90,20 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             logger?.WriteLine($"[{item.Name}] Installer afgesloten met exitcode {process.ExitCode} na {runStopwatch.Elapsed.TotalSeconds:N1}s "
                 + $"— {(success ? "geslaagd" : "mislukt")}.");
 
-            return success ? (true, null) : (false, $"Installer gaf exitcode {process.ExitCode}");
+            if (success) return (true, null);
+
+            var error = $"Installer gaf exitcode {process.ExitCode}";
+            if (msiLogPath is not null && File.Exists(msiLogPath))
+            {
+                var savedLogPath = PersistMsiLog(item.Name, msiLogPath);
+                if (savedLogPath is not null)
+                {
+                    logger?.WriteLine($"[{item.Name}] Msiexec-logbestand bewaard: \"{savedLogPath}\"");
+                    error += $" (msiexec-log: \"{savedLogPath}\")";
+                }
+            }
+
+            return (false, error);
         }
         catch (Exception ex)
         {
@@ -150,11 +165,15 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     }
 
     /// <summary>.msi files aren't directly executable — they need to run through msiexec.exe.</summary>
-    private static ProcessStartInfo BuildProcessStartInfo(string localPath, string silentArgs)
+    private static ProcessStartInfo BuildProcessStartInfo(string localPath, string silentArgs, string? msiLogPath)
     {
         if (Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase))
         {
-            return new ProcessStartInfo("msiexec.exe", $"/i \"{localPath}\" {silentArgs}".TrimEnd())
+            var args = msiLogPath is null
+                ? $"/i \"{localPath}\" {silentArgs}".TrimEnd()
+                : $"/i \"{localPath}\" {silentArgs} /l*v \"{msiLogPath}\"".TrimEnd();
+
+            return new ProcessStartInfo("msiexec.exe", args)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -166,6 +185,30 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+    }
+
+    /// <summary>Copies the msiexec verbose log out of the (about to be deleted) temp folder for later troubleshooting.</summary>
+    private string? PersistMsiLog(string itemName, string msiLogPath)
+    {
+        if (logger is null) return null;
+        try
+        {
+            var logsDir = Path.GetDirectoryName(logger.LogPath)!;
+            var fileName = $"{SanitizeFileName(itemName)}_msiexec_{DateTime.Now:HHmmssfff}.log";
+            var destination = Path.Combine(logsDir, fileName);
+            File.Copy(msiLogPath, destination, overwrite: true);
+            return destination;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name;
     }
 
     private static async Task CopyFileAsync(string source, string destination, CancellationToken ct)
