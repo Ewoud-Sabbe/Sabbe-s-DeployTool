@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using DeployTool.Core.Models;
+using Microsoft.Win32;
 
 namespace DeployTool.Core.Services;
 
@@ -72,6 +74,16 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 
         try
         {
+            var isMsi = Path.GetExtension(installer.FileName).Equals(".msi", StringComparison.OrdinalIgnoreCase);
+
+            // Check before copying: no point pulling a multi-GB installer over the network
+            // just to find out it's already installed.
+            if (TryGetAlreadyInstalledMessage(installer.FullPath, isMsi, installer.DisplayName) is { } alreadyInstalledMessage)
+            {
+                logger?.WriteLine($"[{item.Name}] {alreadyInstalledMessage}");
+                return (ItemStatus.AlreadyInstalled, alreadyInstalledMessage);
+            }
+
             var localPath = Path.Combine(tempDir, installer.FileName);
 
             logger?.WriteLine($"[{item.Name}] Kopiëren gestart: \"{installer.FullPath}\" -> \"{localPath}\"");
@@ -80,13 +92,6 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             copyStopwatch.Stop();
             var sizeMb = new FileInfo(localPath).Length / 1024.0 / 1024.0;
             logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
-
-            var isMsi = Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase);
-            if (isMsi && TryGetAlreadyInstalledMessage(localPath) is { } alreadyInstalledMessage)
-            {
-                logger?.WriteLine($"[{item.Name}] {alreadyInstalledMessage}");
-                return (ItemStatus.AlreadyInstalled, alreadyInstalledMessage);
-            }
 
             var msiLogPath = isMsi ? Path.Combine(tempDir, "msiexec.log") : null;
             var psi = BuildProcessStartInfo(localPath, installer.SilentArgs, msiLogPath);
@@ -175,16 +180,69 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         logger?.Write(new SessionLogEntry(DateTimeOffset.Now, item.Kind, item.Name, status, detail));
     }
 
-    /// <summary>Reads the MSI's own ProductCode and asks Windows Installer whether it's already present.</summary>
-    private static string? TryGetAlreadyInstalledMessage(string msiPath)
+    /// <summary>
+    /// For .msi: asks Windows Installer directly via the package's own ProductCode (authoritative).
+    /// For both .msi and .exe: falls back to matching the configured display name against
+    /// "Programma's en onderdelen" (Uninstall registry), since most .exe installers report
+    /// success even when there was nothing to do — 0 either way.
+    /// </summary>
+    private static string? TryGetAlreadyInstalledMessage(string localPath, bool isMsi, string displayName)
     {
-        var productCode = TryGetMsiProductCode(msiPath);
-        if (productCode is null) return null;
+        if (isMsi)
+        {
+            var productCode = TryGetMsiProductCode(localPath);
+            if (productCode is not null && InstalledProductStates.Contains(MsiQueryProductStateW(productCode)))
+                return $"Al geïnstalleerd (ProductCode {productCode}) — installatie overgeslagen.";
+        }
 
-        var state = MsiQueryProductStateW(productCode);
-        return InstalledProductStates.Contains(state)
-            ? $"Al geïnstalleerd (ProductCode {productCode}) — installatie overgeslagen."
-            : null;
+        if (TryFindInstalledDisplayName(displayName) is { } installedName)
+            return $"Al geïnstalleerd (gevonden in \"Programma's en onderdelen\" als \"{installedName}\") — installatie overgeslagen.";
+
+        return null;
+    }
+
+    /// <summary>Loosely matches a configured display name against installed programs (both registry bitness views + HKCU).</summary>
+    private static string? TryFindInstalledDisplayName(string displayName)
+    {
+        var hint = NormalizeProgramName(displayName);
+        if (hint.Length == 0) return null;
+
+        (RegistryHive Hive, RegistryView View)[] locations =
+        [
+            (RegistryHive.LocalMachine, RegistryView.Registry64),
+            (RegistryHive.LocalMachine, RegistryView.Registry32),
+            (RegistryHive.CurrentUser, RegistryView.Registry64),
+        ];
+
+        foreach (var (hive, view) in locations)
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+            using var uninstallKey = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
+            if (uninstallKey is null) continue;
+
+            foreach (var subKeyName in uninstallKey.GetSubKeyNames())
+            {
+                using var subKey = uninstallKey.OpenSubKey(subKeyName);
+                if (subKey?.GetValue("DisplayName") is not string installedName || string.IsNullOrWhiteSpace(installedName))
+                    continue;
+
+                var normalizedInstalled = NormalizeProgramName(installedName);
+                if (normalizedInstalled.Length > 0 && (normalizedInstalled.Contains(hint) || hint.Contains(normalizedInstalled)))
+                    return installedName;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Lowercases and strips version numbers / "(64-bit)"-style suffixes so names compare sensibly.</summary>
+    private static string NormalizeProgramName(string name)
+    {
+        var normalized = name.ToLowerInvariant();
+        normalized = Regex.Replace(normalized, @"\(.*?\)", "");
+        normalized = Regex.Replace(normalized, @"[\d.]+", "");
+        normalized = Regex.Replace(normalized, @"[^a-z]+", " ");
+        return normalized.Trim();
     }
 
     private static string? TryGetMsiProductCode(string msiPath)
