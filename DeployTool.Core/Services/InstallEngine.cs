@@ -76,14 +76,9 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             var sizeMb = new FileInfo(localPath).Length / 1024.0 / 1024.0;
             logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
 
-            var psi = new ProcessStartInfo(localPath, installer.SilentArgs)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
+            var psi = BuildProcessStartInfo(localPath, installer.SilentArgs);
 
-            var displayArgs = string.IsNullOrWhiteSpace(installer.SilentArgs) ? "(geen argumenten)" : installer.SilentArgs;
-            logger?.WriteLine($"[{item.Name}] Installer starten: \"{localPath}\" {displayArgs}");
+            logger?.WriteLine($"[{item.Name}] Installer starten: \"{psi.FileName}\" {psi.Arguments}");
             var runStopwatch = Stopwatch.StartNew();
             using var process = Process.Start(psi) ?? throw new InvalidOperationException("Kon installer niet starten.");
             await process.WaitForExitAsync(ct);
@@ -152,6 +147,25 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         item.ErrorMessage = error;
         progress?.Report(new SessionItemProgress(item, status, error));
         logger?.Write(new SessionLogEntry(DateTimeOffset.Now, item.Kind, item.Name, status, error));
+    }
+
+    /// <summary>.msi files aren't directly executable — they need to run through msiexec.exe.</summary>
+    private static ProcessStartInfo BuildProcessStartInfo(string localPath, string silentArgs)
+    {
+        if (Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ProcessStartInfo("msiexec.exe", $"/i \"{localPath}\" {silentArgs}".TrimEnd())
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+        }
+
+        return new ProcessStartInfo(localPath, silentArgs)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
     }
 
     private static async Task CopyFileAsync(string source, string destination, CancellationToken ct)
