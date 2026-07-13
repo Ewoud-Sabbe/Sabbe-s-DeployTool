@@ -14,5 +14,5 @@ public sealed class ShareLayout
     public string LogsDir => Path.Combine(Root, "Logs");
 
     public string InstallersJsonPath => Path.Combine(ConfigDir, "installers.json");
-    public string ShortcutsJsonPath => Path.Combine(ShortcutsDir, "shortcuts.json");
+    public string ItemDefaultsJsonPath => Path.Combine(ConfigDir, "item-defaults.json");
 }

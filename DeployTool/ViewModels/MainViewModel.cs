@@ -17,6 +17,7 @@ public partial class MainViewModel : ObservableObject
     private readonly ShortcutCatalogService _shortcutCatalog;
     private readonly SettingsCatalogService _settingsCatalog = new();
     private readonly ShortcutPlacementService _shortcutPlacer = new();
+    private readonly ItemDefaultsStore _itemDefaultsStore;
 
     private SessionLogger? _logger;
     private InstallEngine? _engine;
@@ -47,6 +48,7 @@ public partial class MainViewModel : ObservableObject
         _metadataStore = new InstallerMetadataStore(_layout);
         _installerCatalog = new InstallerCatalogService(_layout, _metadataStore);
         _shortcutCatalog = new ShortcutCatalogService(_layout);
+        _itemDefaultsStore = new ItemDefaultsStore(_layout);
     }
 
     private IEnumerable<SessionItemViewModel> AllItems => Installers.Concat(Shortcuts).Concat(Settings);
@@ -64,6 +66,7 @@ public partial class MainViewModel : ObservableObject
             var installerEntries = await _installerCatalog.DiscoverAsync();
             var shortcutEntries = await _shortcutCatalog.DiscoverAsync();
             var settingActions = _settingsCatalog.GetAll();
+            var itemDefaults = await _itemDefaultsStore.LoadAsync();
 
             Installers.Clear();
             foreach (var entry in installerEntries)
@@ -80,14 +83,15 @@ public partial class MainViewModel : ObservableObject
                     IsSelected = isSelected,
                     Installer = entry
                 };
-                Installers.Add(new SessionItemViewModel(item, entry.IsConfigured));
+                Installers.Add(new SessionItemViewModel(item, entry.IsConfigured, entry.DefaultSelected));
             }
 
             Shortcuts.Clear();
             foreach (var entry in shortcutEntries)
             {
                 var key = $"shortcut:{entry.FileName}";
-                var isSelected = previousSelections.TryGetValue(key, out var wasSelected) && wasSelected;
+                var isDefault = itemDefaults.GetValueOrDefault(key, false);
+                var isSelected = previousSelections.TryGetValue(key, out var wasSelected) ? wasSelected : isDefault;
 
                 var item = new SessionItem
                 {
@@ -96,16 +100,15 @@ public partial class MainViewModel : ObservableObject
                     IsSelected = isSelected,
                     Shortcut = entry
                 };
-                Shortcuts.Add(new SessionItemViewModel(item));
+                Shortcuts.Add(new SessionItemViewModel(item, isDefault: isDefault));
             }
 
             Settings.Clear();
             foreach (var action in settingActions)
             {
                 var key = $"setting:{action.Name}";
-                var isSelected = previousSelections.TryGetValue(key, out var wasSelected)
-                    ? wasSelected
-                    : action.DefaultSelected;
+                var isDefault = itemDefaults.GetValueOrDefault(key, action.DefaultSelected);
+                var isSelected = previousSelections.TryGetValue(key, out var wasSelected) ? wasSelected : isDefault;
 
                 var item = new SessionItem
                 {
@@ -114,7 +117,7 @@ public partial class MainViewModel : ObservableObject
                     IsSelected = isSelected,
                     Setting = action
                 };
-                Settings.Add(new SessionItemViewModel(item));
+                Settings.Add(new SessionItemViewModel(item, isDefault: isDefault));
             }
 
             StatusMessage = "Klaar om te starten.";
@@ -205,6 +208,16 @@ public partial class MainViewModel : ObservableObject
 
         await _metadataStore.UpsertAsync(dialogViewModel.ToDefinition());
         await LoadAsync();
+    }
+
+    /// <summary>Flips whether a shortcut/setting is pre-checked on future loads. Takes effect next time, not retroactively.</summary>
+    [RelayCommand]
+    private async Task ToggleDefaultAsync(SessionItemViewModel? item)
+    {
+        if (item is null || !item.CanToggleDefault) return;
+
+        item.IsDefault = !item.IsDefault;
+        await _itemDefaultsStore.SetAsync(item.DefaultsKey, item.IsDefault);
     }
 
     private void OnProgress(SessionItemProgress progress)

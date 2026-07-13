@@ -18,12 +18,14 @@
         <conv:ItemStatusToPillVisibilityConverter x:Key="StatusToPillVisibility"/>
         <conv:ItemStatusToRetryVisibilityConverter x:Key="StatusToRetryVisibility"/>
         <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+        <conv:BoolToStarConverter x:Key="BoolToStar"/>
+        <conv:BoolToAccentForegroundConverter x:Key="BoolToAccentForeground"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
 
         <Style x:Key="RowBorder" TargetType="Border">
             <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
-            <Setter Property="Padding" Value="2,12"/>
+            <Setter Property="Padding" Value="2,8"/>
             <Setter Property="Background" Value="Transparent"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
@@ -49,23 +51,37 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <CheckBox Grid.Column="0" VerticalAlignment="Center" Margin="6,0,12,0"
+                    <CheckBox Grid.Column="0" VerticalAlignment="Center" Margin="4,0,10,0"
                               IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsConfigured}"/>
 
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontSize="13.5"/>
                         <Border Style="{StaticResource PillBorder}" Background="{StaticResource RunningSoftBrush}"
-                                HorizontalAlignment="Left" Margin="0,4,0,0" Padding="8,2"
+                                HorizontalAlignment="Left" Margin="0,3,0,0" Padding="8,2"
                                 Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}">
                             <TextBlock Text="Nog te configureren" FontSize="10.5" FontWeight="SemiBold"
                                        Foreground="{StaticResource RunningBrush}"/>
                         </Border>
                     </StackPanel>
 
-                    <Button Grid.Column="2" Content="{Binding ConfigureButtonLabel}" Style="{StaticResource GhostButton}" Margin="8,0"
+                    <Button Grid.Column="2" Content="{Binding ConfigureButtonLabel}" Style="{StaticResource GhostButton}" Margin="6,0"
                             Visibility="{Binding IsInstaller, Converter={StaticResource BoolToVisibility}}"
                             Command="{Binding DataContext.ConfigureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding}"/>
+
+                    <Button Grid.Column="2" Style="{StaticResource GhostButton}" Margin="6,0" Padding="8,5"
+                            Visibility="{Binding CanToggleDefault, Converter={StaticResource BoolToVisibility}}"
+                            ToolTip="Standaard aangevinkt bij een nieuwe sessie"
+                            Command="{Binding DataContext.ToggleDefaultCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding IsDefault, Converter={StaticResource BoolToStar}}"
+                                       Foreground="{Binding IsDefault, Converter={StaticResource BoolToAccentForeground}}"
+                                       FontSize="12" VerticalAlignment="Center"/>
+                            <TextBlock Text="Standaard" FontSize="12" Margin="5,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{Binding IsDefault, Converter={StaticResource BoolToAccentForeground}}"/>
+                        </StackPanel>
+                    </Button>
 
                     <Border Grid.Column="3" Style="{StaticResource PillBorder}" Margin="8,0"
                             Background="{Binding Status, Converter={StaticResource StatusToPillBackground}}"
@@ -90,7 +106,8 @@
         </DataTemplate>
 
         <Style x:Key="SectionCard" TargetType="Border" BasedOn="{StaticResource CardBorder}">
-            <Setter Property="Margin" Value="0,0,0,16"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="Padding" Value="16"/>
         </Style>
     </Window.Resources>
 
@@ -104,15 +121,15 @@
 
         <!-- Header -->
         <Border Grid.Row="0" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="0,0,0,1" Padding="28,18">
+                BorderThickness="0,0,0,1" Padding="24,12">
             <StackPanel Orientation="Horizontal">
-                <Border Width="38" Height="38" CornerRadius="10" Background="{StaticResource AccentBrush}">
-                    <TextBlock Text="PC" Foreground="White" FontWeight="Bold" FontSize="14"
+                <Border Width="32" Height="32" CornerRadius="9" Background="{StaticResource AccentBrush}">
+                    <TextBlock Text="PC" Foreground="White" FontWeight="Bold" FontSize="12"
                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
-                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="PC Voorinstallatie" FontSize="17" FontWeight="SemiBold"/>
-                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,2,0,0">
+                <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="PC Voorinstallatie" FontSize="15.5" FontWeight="SemiBold"/>
+                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="11.5" Margin="0,1,0,0">
                         <Run Text="Voorbereiden van"/>
                         <Run Text="{Binding MachineName, Mode=OneWay}" FontWeight="SemiBold"/>
                     </TextBlock>
@@ -130,11 +147,11 @@
         <!-- Content -->
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0"
                       Visibility="{Binding IsLoading, Converter={StaticResource InverseBoolToVisibility}}">
-            <StackPanel Margin="28,20,28,4">
+            <StackPanel Margin="24,16,24,4">
 
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <DockPanel Margin="0,0,0,6">
+                        <DockPanel Margin="0,0,0,4">
                             <TextBlock Text="Software" Style="{StaticResource SectionHeaderText}"/>
                             <TextBlock Text="{Binding Installers.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
                         </DockPanel>
@@ -144,7 +161,7 @@
 
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <DockPanel Margin="0,0,0,6">
+                        <DockPanel Margin="0,0,0,4">
                             <TextBlock Text="Snelkoppelingen" Style="{StaticResource SectionHeaderText}"/>
                             <TextBlock Text="{Binding Shortcuts.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
                         </DockPanel>
@@ -154,7 +171,7 @@
 
                 <Border Style="{StaticResource SectionCard}">
                     <StackPanel>
-                        <DockPanel Margin="0,0,0,6">
+                        <DockPanel Margin="0,0,0,4">
                             <TextBlock Text="Instellingen" Style="{StaticResource SectionHeaderText}"/>
                             <TextBlock Text="{Binding Settings.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
                         </DockPanel>
@@ -166,9 +183,9 @@
         </ScrollViewer>
 
         <!-- Live log -->
-        <Border Grid.Row="2" Background="{StaticResource TerminalBackgroundBrush}" Margin="28,0,28,16" CornerRadius="12" Padding="0">
+        <Border Grid.Row="2" Background="{StaticResource TerminalBackgroundBrush}" Margin="24,0,24,12" CornerRadius="12" Padding="0">
             <DockPanel>
-                <DockPanel DockPanel.Dock="Top" Margin="16,12,16,8">
+                <DockPanel DockPanel.Dock="Top" Margin="16,10,16,6">
                     <TextBlock Text="LIVE LOGGING" Foreground="{StaticResource TerminalMutedBrush}" FontSize="11" FontWeight="Bold"/>
                 </DockPanel>
                 <ListBox x:Name="LogListBox" ItemsSource="{Binding LogLines}" DockPanel.Dock="Bottom"
@@ -195,7 +212,7 @@
 
         <!-- Footer -->
         <Border Grid.Row="3" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
-                BorderThickness="0,1,0,0" Padding="28,16">
+                BorderThickness="0,1,0,0" Padding="24,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
