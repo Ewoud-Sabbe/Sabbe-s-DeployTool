@@ -14,6 +14,7 @@ public sealed class ItemStatusToGlyphConverter : IValueConverter
         ItemStatus.Running => "⏳",
         ItemStatus.Succeeded => "✅",
         ItemStatus.Failed => "❌",
+        ItemStatus.AlreadyInstalled => "ℹ️",
         _ => ""
     };
 
@@ -43,6 +44,7 @@ public sealed class ItemStatusToBrushConverter : IValueConverter
         ItemStatus.Succeeded => Brushes.Green,
         ItemStatus.Failed => Brushes.Red,
         ItemStatus.Running => Brushes.DarkOrange,
+        ItemStatus.AlreadyInstalled => Brushes.SteelBlue,
         _ => Brushes.Gray
     };
 

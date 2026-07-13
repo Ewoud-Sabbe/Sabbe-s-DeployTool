@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 using DeployTool.Core.Models;
 
 namespace DeployTool.Core.Services;
@@ -11,6 +13,9 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 {
     // MSI success codes: 0 = OK, 3010 = success but reboot required.
     private static readonly HashSet<int> SuccessExitCodes = [0, 3010];
+
+    // INSTALLSTATE values (msi.h) that mean the product is present on the machine.
+    private static readonly HashSet<int> InstalledProductStates = [3, 4, 5]; // LOCAL, SOURCE, DEFAULT
 
     public async Task RunAsync(IReadOnlyList<SessionItem> items, IProgress<SessionItemProgress>? progress, CancellationToken ct = default)
     {
@@ -49,17 +54,17 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     {
         Report(item, ItemStatus.Running, progress);
 
-        var (success, error) = await TryInstallOnceAsync(item, ct);
-        if (!success)
+        var (status, detail) = await TryInstallOnceAsync(item, ct);
+        if (status == ItemStatus.Failed)
         {
-            logger?.WriteLine($"[{item.Name}] Eerste poging mislukt ({error}) — automatische nieuwe poging wordt gestart.");
-            (success, error) = await TryInstallOnceAsync(item, ct);
+            logger?.WriteLine($"[{item.Name}] Eerste poging mislukt ({detail}) — automatische nieuwe poging wordt gestart.");
+            (status, detail) = await TryInstallOnceAsync(item, ct);
         }
 
-        Report(item, success ? ItemStatus.Succeeded : ItemStatus.Failed, progress, error);
+        Report(item, status, progress, detail);
     }
 
-    private async Task<(bool Success, string? Error)> TryInstallOnceAsync(SessionItem item, CancellationToken ct)
+    private async Task<(ItemStatus Status, string? Detail)> TryInstallOnceAsync(SessionItem item, CancellationToken ct)
     {
         var installer = item.Installer ?? throw new InvalidOperationException($"'{item.Name}' heeft geen installer-gegevens.");
         var tempDir = Path.Combine(Path.GetTempPath(), "PCSetup", Guid.NewGuid().ToString("N"));
@@ -77,6 +82,12 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
 
             var isMsi = Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase);
+            if (isMsi && TryGetAlreadyInstalledMessage(localPath) is { } alreadyInstalledMessage)
+            {
+                logger?.WriteLine($"[{item.Name}] {alreadyInstalledMessage}");
+                return (ItemStatus.AlreadyInstalled, alreadyInstalledMessage);
+            }
+
             var msiLogPath = isMsi ? Path.Combine(tempDir, "msiexec.log") : null;
             var psi = BuildProcessStartInfo(localPath, installer.SilentArgs, msiLogPath);
 
@@ -90,7 +101,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             logger?.WriteLine($"[{item.Name}] Installer afgesloten met exitcode {process.ExitCode} na {runStopwatch.Elapsed.TotalSeconds:N1}s "
                 + $"— {(success ? "geslaagd" : "mislukt")}.");
 
-            if (success) return (true, null);
+            if (success) return (ItemStatus.Succeeded, null);
 
             var error = $"Installer gaf exitcode {process.ExitCode}";
             if (msiLogPath is not null && File.Exists(msiLogPath))
@@ -103,12 +114,12 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
                 }
             }
 
-            return (false, error);
+            return (ItemStatus.Failed, error);
         }
         catch (Exception ex)
         {
             logger?.WriteLine($"[{item.Name}] Fout tijdens installatie: {ex.Message}");
-            return (false, ex.Message);
+            return (ItemStatus.Failed, ex.Message);
         }
         finally
         {
@@ -156,13 +167,58 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         }
     }
 
-    private void Report(SessionItem item, ItemStatus status, IProgress<SessionItemProgress>? progress, string? error = null)
+    private void Report(SessionItem item, ItemStatus status, IProgress<SessionItemProgress>? progress, string? detail = null)
     {
         item.Status = status;
-        item.ErrorMessage = error;
-        progress?.Report(new SessionItemProgress(item, status, error));
-        logger?.Write(new SessionLogEntry(DateTimeOffset.Now, item.Kind, item.Name, status, error));
+        item.ErrorMessage = detail;
+        progress?.Report(new SessionItemProgress(item, status, detail));
+        logger?.Write(new SessionLogEntry(DateTimeOffset.Now, item.Kind, item.Name, status, detail));
     }
+
+    /// <summary>Reads the MSI's own ProductCode and asks Windows Installer whether it's already present.</summary>
+    private static string? TryGetAlreadyInstalledMessage(string msiPath)
+    {
+        var productCode = TryGetMsiProductCode(msiPath);
+        if (productCode is null) return null;
+
+        var state = MsiQueryProductStateW(productCode);
+        return InstalledProductStates.Contains(state)
+            ? $"Al geïnstalleerd (ProductCode {productCode}) — installatie overgeslagen."
+            : null;
+    }
+
+    private static string? TryGetMsiProductCode(string msiPath)
+    {
+        var handle = IntPtr.Zero;
+        try
+        {
+            if (MsiOpenPackageW(msiPath, out handle) != 0) return null;
+
+            var buffer = new StringBuilder(64);
+            var size = buffer.Capacity;
+            return MsiGetPropertyW(handle, "ProductCode", buffer, ref size) == 0 ? buffer.ToString() : null;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero) MsiCloseHandle(handle);
+        }
+    }
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern uint MsiOpenPackageW(string szPackagePath, out IntPtr hProduct);
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern uint MsiGetPropertyW(IntPtr hInstall, string szName, StringBuilder szValueBuf, ref int pcchValueBuf);
+
+    [DllImport("msi.dll", ExactSpelling = true)]
+    private static extern int MsiCloseHandle(IntPtr hAny);
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int MsiQueryProductStateW(string szProduct);
 
     /// <summary>.msi files aren't directly executable — they need to run through msiexec.exe.</summary>
     private static ProcessStartInfo BuildProcessStartInfo(string localPath, string silentArgs, string? msiLogPath)

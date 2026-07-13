@@ -5,5 +5,8 @@ public enum ItemStatus
     Pending,
     Running,
     Succeeded,
-    Failed
+    Failed,
+
+    /// <summary>MSI ProductCode was already installed — skipped, not run, not a failure.</summary>
+    AlreadyInstalled
 }
