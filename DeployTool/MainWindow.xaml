@@ -7,18 +7,39 @@
         xmlns:vm="clr-namespace:DeployTool.ViewModels"
         xmlns:conv="clr-namespace:DeployTool.Converters"
         mc:Ignorable="d"
-        Title="PC Voorinstallatie" Height="720" Width="900"
+        Title="PC Voorinstallatie" Height="780" Width="960" MinHeight="600" MinWidth="760"
         WindowStartupLocation="CenterScreen">
 
     <Window.Resources>
-        <conv:ItemStatusToGlyphConverter x:Key="StatusToGlyph"/>
-        <conv:ItemStatusToBrushConverter x:Key="StatusToBrush"/>
+        <conv:ItemStatusToIconConverter x:Key="StatusToIcon"/>
+        <conv:ItemStatusToLabelConverter x:Key="StatusToLabel"/>
+        <conv:ItemStatusToPillForegroundConverter x:Key="StatusToPillForeground"/>
+        <conv:ItemStatusToPillBackgroundConverter x:Key="StatusToPillBackground"/>
+        <conv:ItemStatusToPillVisibilityConverter x:Key="StatusToPillVisibility"/>
         <conv:ItemStatusToRetryVisibilityConverter x:Key="StatusToRetryVisibility"/>
         <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
 
+        <Style x:Key="RowBorder" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="2,12"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="PillBorder" TargetType="Border">
+            <Setter Property="CornerRadius" Value="999"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
         <DataTemplate x:Key="ItemRowTemplate" DataType="{x:Type vm:SessionItemViewModel}">
-            <Border BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="4,6">
+            <Border Style="{StaticResource RowBorder}">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -28,87 +49,163 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <CheckBox Grid.Column="0" VerticalAlignment="Center" Margin="0,0,8,0"
+                    <CheckBox Grid.Column="0" VerticalAlignment="Center" Margin="6,0,12,0"
                               IsChecked="{Binding IsSelected}" IsEnabled="{Binding IsConfigured}"/>
 
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="nog te configureren" FontStyle="Italic" Foreground="DarkOrange" FontSize="11"
-                                   Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}"/>
+                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" FontSize="13.5"/>
+                        <Border Style="{StaticResource PillBorder}" Background="{StaticResource RunningSoftBrush}"
+                                HorizontalAlignment="Left" Margin="0,4,0,0" Padding="8,2"
+                                Visibility="{Binding IsConfigured, Converter={StaticResource InverseBoolToVisibility}}">
+                            <TextBlock Text="Nog te configureren" FontSize="10.5" FontWeight="SemiBold"
+                                       Foreground="{StaticResource RunningBrush}"/>
+                        </Border>
                     </StackPanel>
 
-                    <Button Grid.Column="2" Content="{Binding ConfigureButtonLabel}" Margin="4,0" Padding="6,2"
+                    <Button Grid.Column="2" Content="{Binding ConfigureButtonLabel}" Style="{StaticResource GhostButton}" Margin="8,0"
                             Visibility="{Binding IsInstaller, Converter={StaticResource BoolToVisibility}}"
                             Command="{Binding DataContext.ConfigureCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding}"/>
 
-                    <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="8,0"
-                               FontSize="16"
-                               Text="{Binding Status, Converter={StaticResource StatusToGlyph}}"
-                               Foreground="{Binding Status, Converter={StaticResource StatusToBrush}}"
-                               ToolTip="{Binding ErrorMessage}"/>
+                    <Border Grid.Column="3" Style="{StaticResource PillBorder}" Margin="8,0"
+                            Background="{Binding Status, Converter={StaticResource StatusToPillBackground}}"
+                            Visibility="{Binding Status, Converter={StaticResource StatusToPillVisibility}}"
+                            ToolTip="{Binding ErrorMessage}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Status, Converter={StaticResource StatusToIcon}}"
+                                       Foreground="{Binding Status, Converter={StaticResource StatusToPillForeground}}"
+                                       FontWeight="Bold" FontSize="11" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Status, Converter={StaticResource StatusToLabel}}"
+                                       Foreground="{Binding Status, Converter={StaticResource StatusToPillForeground}}"
+                                       FontSize="11" FontWeight="SemiBold" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
 
-                    <Button Grid.Column="4" Content="Opnieuw proberen" Padding="6,2"
+                    <Button Grid.Column="4" Content="Opnieuw proberen" Style="{StaticResource GhostButton}"
                             Visibility="{Binding Status, Converter={StaticResource StatusToRetryVisibility}}"
                             Command="{Binding DataContext.RetryCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                             CommandParameter="{Binding}"/>
                 </Grid>
             </Border>
         </DataTemplate>
+
+        <Style x:Key="SectionCard" TargetType="Border" BasedOn="{StaticResource CardBorder}">
+            <Setter Property="Margin" Value="0,0,0,16"/>
+        </Style>
     </Window.Resources>
 
-    <Grid Margin="16">
+    <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="200"/>
+            <RowDefinition Height="210"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}">
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,0,0,1" Padding="28,18">
+            <StackPanel Orientation="Horizontal">
+                <Border Width="38" Height="38" CornerRadius="10" Background="{StaticResource AccentBrush}">
+                    <TextBlock Text="PC" Foreground="White" FontWeight="Bold" FontSize="14"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="PC Voorinstallatie" FontSize="17" FontWeight="SemiBold"/>
+                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,2,0,0">
+                        <Run Text="Voorbereiden van"/>
+                        <Run Text="{Binding MachineName, Mode=OneWay}" FontWeight="SemiBold"/>
+                    </TextBlock>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Loading state -->
+        <Grid Grid.Row="1" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                <TextBlock Text="{Binding StatusMessage}" FontSize="16"/>
+                <TextBlock Text="{Binding StatusMessage}" FontSize="15" Foreground="{StaticResource TextSecondaryBrush}"/>
             </StackPanel>
         </Grid>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
+        <!-- Content -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0"
                       Visibility="{Binding IsLoading, Converter={StaticResource InverseBoolToVisibility}}">
-            <StackPanel>
-                <GroupBox Header="Software" Margin="0,0,0,12">
-                    <ItemsControl ItemsSource="{Binding Installers}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
-                </GroupBox>
+            <StackPanel Margin="28,20,28,4">
 
-                <GroupBox Header="Snelkoppelingen" Margin="0,0,0,12">
-                    <ItemsControl ItemsSource="{Binding Shortcuts}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
-                </GroupBox>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock Text="Software" Style="{StaticResource SectionHeaderText}"/>
+                            <TextBlock Text="{Binding Installers.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding Installers}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                    </StackPanel>
+                </Border>
 
-                <GroupBox Header="Instellingen" Margin="0,0,0,12">
-                    <ItemsControl ItemsSource="{Binding Settings}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
-                </GroupBox>
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock Text="Snelkoppelingen" Style="{StaticResource SectionHeaderText}"/>
+                            <TextBlock Text="{Binding Shortcuts.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding Shortcuts}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,6">
+                            <TextBlock Text="Instellingen" Style="{StaticResource SectionHeaderText}"/>
+                            <TextBlock Text="{Binding Settings.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding Settings}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                    </StackPanel>
+                </Border>
+
             </StackPanel>
         </ScrollViewer>
 
-        <GroupBox Grid.Row="1" Header="Live logging" Margin="0,12,0,0">
-            <ListBox x:Name="LogListBox" ItemsSource="{Binding LogLines}"
-                     FontFamily="Consolas" FontSize="11"
-                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                     HorizontalContentAlignment="Stretch">
-                <ListBox.ItemContainerStyle>
-                    <Style TargetType="ListBoxItem">
-                        <Setter Property="Padding" Value="2,0"/>
-                        <Setter Property="MinHeight" Value="0"/>
-                    </Style>
-                </ListBox.ItemContainerStyle>
-            </ListBox>
-        </GroupBox>
+        <!-- Live log -->
+        <Border Grid.Row="2" Background="{StaticResource TerminalBackgroundBrush}" Margin="28,0,28,16" CornerRadius="12" Padding="0">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="16,12,16,8">
+                    <TextBlock Text="LIVE LOGGING" Foreground="{StaticResource TerminalMutedBrush}" FontSize="11" FontWeight="Bold"/>
+                </DockPanel>
+                <ListBox x:Name="LogListBox" ItemsSource="{Binding LogLines}" DockPanel.Dock="Bottom"
+                         Background="Transparent" BorderThickness="0" Padding="16,0,16,12"
+                         FontFamily="{StaticResource MonoFontFamily}" FontSize="11.5" Foreground="{StaticResource TerminalTextBrush}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0,1"/>
+                            <Setter Property="MinHeight" Value="0"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <ContentPresenter Margin="{TemplateBinding Padding}"/>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                </ListBox>
+            </DockPanel>
+        </Border>
 
-        <Grid Grid.Row="2" Margin="0,12,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" VerticalAlignment="Center"/>
-            <Button Grid.Column="1" Content="Start" Width="140" Height="36" FontWeight="Bold"
-                    Command="{Binding StartCommand}"/>
-        </Grid>
+        <!-- Footer -->
+        <Border Grid.Row="3" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="0,1,0,0" Padding="28,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" VerticalAlignment="Center"
+                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                <Button Grid.Column="1" Content="Start installatie" Style="{StaticResource PrimaryButton}"
+                        Command="{Binding StartCommand}"/>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

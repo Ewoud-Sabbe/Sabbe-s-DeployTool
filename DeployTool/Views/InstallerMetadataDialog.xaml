@@ -2,40 +2,38 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Installer configureren"
-        Width="420" SizeToContent="Height"
+        Width="440" SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize">
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="16"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+    <StackPanel Margin="28,24,28,24">
 
-        <TextBlock Grid.Row="0" Text="{Binding FileName}" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,12"/>
-
-        <TextBlock Grid.Row="1" Text="Weergavenaam"/>
-        <TextBox Grid.Row="2" Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,12"/>
-
-        <TextBlock Grid.Row="3" Text="Silent-install switch (bv. /S, /silent, /qn)"/>
-        <TextBox Grid.Row="4" Text="{Binding SilentArgs, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,12"/>
-
-        <TextBlock Grid.Row="5" Text="Categorie (optioneel)"/>
-        <TextBox Grid.Row="6" Text="{Binding Category, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,12"/>
-
-        <CheckBox Grid.Row="7" Content="Standaard geselecteerd" IsChecked="{Binding DefaultSelected}" Margin="0,0,0,4"/>
-
-        <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Annuleren" Width="90" Margin="0,0,8,0" Click="Cancel_Click" IsCancel="True"/>
-            <Button Content="Opslaan" Width="90" Click="Save_Click" IsDefault="True"/>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+            <Border Width="34" Height="34" CornerRadius="9" Background="{StaticResource AccentBrush}">
+                <TextBlock Text="⚙" Foreground="White" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="Installer configureren" FontSize="15" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding FileName}" FontSize="11.5" Foreground="{StaticResource TextSecondaryBrush}"
+                           TextWrapping="Wrap" MaxWidth="330" Margin="0,1,0,0"/>
+            </StackPanel>
         </StackPanel>
-    </Grid>
+
+        <TextBlock Text="WEERGAVENAAM" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,0,0,6"/>
+        <TextBox Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,16"/>
+
+        <TextBlock Text="SILENT-INSTALL SWITCH" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,0,0,6"/>
+        <TextBox Text="{Binding SilentArgs, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,4"/>
+        <TextBlock Text="bijvoorbeeld /S, /silent of /qn" FontSize="11" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,0,0,16"/>
+
+        <TextBlock Text="CATEGORIE (OPTIONEEL)" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,0,0,6"/>
+        <TextBox Text="{Binding Category, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,18"/>
+
+        <CheckBox Content="Standaard geselecteerd" IsChecked="{Binding DefaultSelected}" Margin="0,0,0,24"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Annuleren" Width="100" Margin="0,0,8,0" Click="Cancel_Click" IsCancel="True"/>
+            <Button Content="Opslaan" Width="100" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Center" Click="Save_Click" IsDefault="True"/>
+        </StackPanel>
+    </StackPanel>
 </Window>

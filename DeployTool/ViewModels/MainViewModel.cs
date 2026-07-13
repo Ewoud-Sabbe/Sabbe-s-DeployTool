@@ -28,6 +28,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Mirrors the session log file, line for line, as it's written.</summary>
     public ObservableCollection<string> LogLines { get; } = [];
 
+    public string MachineName => Environment.MachineName;
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     private bool isLoading = true;
