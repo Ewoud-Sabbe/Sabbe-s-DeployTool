@@ -105,8 +105,12 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
                 // Installed via the Windows Installer API directly (not msiexec.exe as a child
                 // process) so MsiSetInternalUI(NONE) can force zero UI — msiexec.exe's own
                 // "preparing to install" flash isn't fully suppressed by /qn in all cases.
+                // MSIRESTARTMANAGERCONTROL=Disable additionally suppresses the separate Restart
+                // Manager "which files are in use" dialog, which isn't governed by the UI level at
+                // all and would otherwise still flash partway through a real install.
                 msiLogPath = Path.Combine(tempDir, "msiexec.log");
-                var properties = ExtractMsiProperties(installer.SilentArgs);
+                var properties = "MSIRESTARTMANAGERCONTROL=Disable " + ExtractMsiProperties(installer.SilentArgs);
+                properties = properties.TrimEnd();
                 logger?.WriteLine($"[{item.Name}] MSI installeren via Windows Installer-API (geen UI): \"{localPath}\""
                     + (properties.Length > 0 ? $" {properties}" : ""));
 
