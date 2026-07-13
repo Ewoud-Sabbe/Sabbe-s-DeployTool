@@ -19,6 +19,9 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     // INSTALLSTATE values (msi.h) that mean the product is present on the machine.
     private static readonly HashSet<int> InstalledProductStates = [3, 4, 5]; // LOCAL, SOURCE, DEFAULT
 
+    private const int InstallUiLevelNone = 2; // INSTALLUILEVEL_NONE — no dialogs, no "preparing to install" flash.
+    private const uint MsiLogModeBasic = 0x1F; // FATALEXIT | ERROR | WARNING | USER | INFO
+
     public async Task RunAsync(IReadOnlyList<SessionItem> items, IProgress<SessionItemProgress>? progress, CancellationToken ct = default)
     {
         var selected = items.Where(i => i.IsSelected).ToList();
@@ -93,22 +96,50 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             var sizeMb = new FileInfo(localPath).Length / 1024.0 / 1024.0;
             logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
 
-            var msiLogPath = isMsi ? Path.Combine(tempDir, "msiexec.log") : null;
-            var psi = BuildProcessStartInfo(localPath, installer.SilentArgs, msiLogPath);
-
-            logger?.WriteLine($"[{item.Name}] Installer starten: \"{psi.FileName}\" {psi.Arguments}");
+            int exitCode;
+            string? msiLogPath = null;
             var runStopwatch = Stopwatch.StartNew();
-            using var process = Process.Start(psi) ?? throw new InvalidOperationException("Kon installer niet starten.");
-            await process.WaitForExitAsync(ct);
+
+            if (isMsi)
+            {
+                // Installed via the Windows Installer API directly (not msiexec.exe as a child
+                // process) so MsiSetInternalUI(NONE) can force zero UI — msiexec.exe's own
+                // "preparing to install" flash isn't fully suppressed by /qn in all cases.
+                msiLogPath = Path.Combine(tempDir, "msiexec.log");
+                var properties = ExtractMsiProperties(installer.SilentArgs);
+                logger?.WriteLine($"[{item.Name}] MSI installeren via Windows Installer-API (geen UI): \"{localPath}\""
+                    + (properties.Length > 0 ? $" {properties}" : ""));
+
+                exitCode = (int)await Task.Run(() =>
+                {
+                    var hwnd = IntPtr.Zero;
+                    MsiSetInternalUI(InstallUiLevelNone, ref hwnd);
+                    MsiEnableLogW(MsiLogModeBasic, msiLogPath, 0);
+                    return MsiInstallProductW(localPath, properties.Length > 0 ? properties : null);
+                }, ct);
+            }
+            else
+            {
+                var psi = new ProcessStartInfo(localPath, installer.SilentArgs)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                logger?.WriteLine($"[{item.Name}] Installer starten: \"{psi.FileName}\" {psi.Arguments}");
+                using var process = Process.Start(psi) ?? throw new InvalidOperationException("Kon installer niet starten.");
+                await process.WaitForExitAsync(ct);
+                exitCode = process.ExitCode;
+            }
+
             runStopwatch.Stop();
 
-            var success = SuccessExitCodes.Contains(process.ExitCode);
-            logger?.WriteLine($"[{item.Name}] Installer afgesloten met exitcode {process.ExitCode} na {runStopwatch.Elapsed.TotalSeconds:N1}s "
+            var success = SuccessExitCodes.Contains(exitCode);
+            logger?.WriteLine($"[{item.Name}] Installer afgesloten met exitcode {exitCode} na {runStopwatch.Elapsed.TotalSeconds:N1}s "
                 + $"— {(success ? "geslaagd" : "mislukt")}.");
 
             if (success) return (ItemStatus.Succeeded, null);
 
-            var error = $"Installer gaf exitcode {process.ExitCode}";
+            var error = $"Installer gaf exitcode {exitCode}";
             if (msiLogPath is not null && File.Exists(msiLogPath))
             {
                 var savedLogPath = PersistMsiLog(item.Name, msiLogPath);
@@ -278,27 +309,25 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     [DllImport("msi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int MsiQueryProductStateW(string szProduct);
 
-    /// <summary>.msi files aren't directly executable — they need to run through msiexec.exe.</summary>
-    private static ProcessStartInfo BuildProcessStartInfo(string localPath, string silentArgs, string? msiLogPath)
+    [DllImport("msi.dll", ExactSpelling = true)]
+    private static extern int MsiSetInternalUI(int dwUILevel, ref IntPtr phWnd);
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern uint MsiEnableLogW(uint dwLogMode, string? szLogFile, uint dwLogAttributes);
+
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern uint MsiInstallProductW(string szPackagePath, string? szCommandLine);
+
+    /// <summary>
+    /// The configured "SilentArgs" historically held msiexec.exe switches like "/qn", which are
+    /// meaningless to the direct MsiInstallProductW API (UI is forced off via MsiSetInternalUI
+    /// instead). Only genuine PROPERTY=VALUE tokens are passed through.
+    /// </summary>
+    private static string ExtractMsiProperties(string silentArgs)
     {
-        if (Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase))
-        {
-            var args = msiLogPath is null
-                ? $"/i \"{localPath}\" {silentArgs}".TrimEnd()
-                : $"/i \"{localPath}\" {silentArgs} /l*v \"{msiLogPath}\"".TrimEnd();
-
-            return new ProcessStartInfo("msiexec.exe", args)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-        }
-
-        return new ProcessStartInfo(localPath, silentArgs)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
+        if (string.IsNullOrWhiteSpace(silentArgs)) return string.Empty;
+        var properties = silentArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(t => t.Contains('='));
+        return string.Join(' ', properties);
     }
 
     /// <summary>Copies the msiexec verbose log out of the (about to be deleted) temp folder for later troubleshooting.</summary>
