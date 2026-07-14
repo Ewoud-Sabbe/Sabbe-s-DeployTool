@@ -9,7 +9,9 @@ namespace DeployTool.Core.Services;
 
 /// <summary>
 /// Executes a session: shortcuts and settings run first (fast, no retry), then installers run
-/// sequentially — copy to a per-item temp folder, silent install, cleanup, 1x retry on failure.
+/// in order — copy to a per-item temp folder, silent install, cleanup, 1x retry on failure.
+/// While one installer runs (local, no network use), the next one's copy is already prefetched
+/// in the background so the network link isn't sitting idle during a multi-minute install.
 /// </summary>
 public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, SessionLogger? logger = null)
 {
@@ -33,8 +35,8 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         foreach (var item in items.Where(i => i.Kind == SessionItemKind.Setting && i.IsSelected))
             await RunSettingAsync(item, progress, ct);
 
-        foreach (var item in items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected))
-            await RunInstallerWithRetryAsync(item, progress, ct);
+        var installerItems = items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected).ToList();
+        await RunInstallersPipelinedAsync(installerItems, progress, ct);
 
         logger?.WriteLine("Sessie voltooid.");
     }
@@ -52,21 +54,67 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         };
     }
 
+    /// <summary>
+    /// Runs installers in order, but starts copying installer N+1 as soon as installer N's own
+    /// copy finishes — so that copy happens in the background while N is actually installing
+    /// (a purely local, network-idle phase that can easily run for minutes on a large installer).
+    /// </summary>
+    private async Task RunInstallersPipelinedAsync(IReadOnlyList<SessionItem> installerItems, IProgress<SessionItemProgress>? progress, CancellationToken ct)
+    {
+        if (installerItems.Count == 0) return;
+
+        Task<PrepareOutcome>? nextPrepare = PrepareAsync(installerItems[0], ct);
+
+        for (var i = 0; i < installerItems.Count; i++)
+        {
+            var item = installerItems[i];
+            Report(item, ItemStatus.Running, progress);
+
+            var prepared = await nextPrepare!;
+
+            // This item's copy just finished — kick off the next one now, so it overlaps with
+            // this item's install instead of only starting once the install is done.
+            nextPrepare = i + 1 < installerItems.Count ? PrepareAsync(installerItems[i + 1], ct) : null;
+
+            var (status, detail) = await InstallWithRetryAsync(item, prepared, ct);
+            Report(item, status, progress, detail);
+        }
+    }
+
     private async Task RunInstallerWithRetryAsync(SessionItem item, IProgress<SessionItemProgress>? progress, CancellationToken ct)
     {
         Report(item, ItemStatus.Running, progress);
-
-        var (status, detail) = await TryInstallOnceAsync(item, ct);
-        if (status == ItemStatus.Failed)
-        {
-            logger?.WriteLine($"[{item.Name}] Eerste poging mislukt ({detail}) — automatische nieuwe poging wordt gestart.");
-            (status, detail) = await TryInstallOnceAsync(item, ct);
-        }
-
+        var prepared = await PrepareAsync(item, ct);
+        var (status, detail) = await InstallWithRetryAsync(item, prepared, ct);
         Report(item, status, progress, detail);
     }
 
-    private async Task<(ItemStatus Status, string? Detail)> TryInstallOnceAsync(SessionItem item, CancellationToken ct)
+    private async Task<(ItemStatus Status, string? Detail)> InstallWithRetryAsync(SessionItem item, PrepareOutcome prepared, CancellationToken ct)
+    {
+        var (status, detail) = await ExecutePreparedAsync(item, prepared, ct);
+        if (status == ItemStatus.Failed)
+        {
+            logger?.WriteLine($"[{item.Name}] Eerste poging mislukt ({detail}) — automatische nieuwe poging wordt gestart.");
+            var retryPrepared = await PrepareAsync(item, ct);
+            (status, detail) = await ExecutePreparedAsync(item, retryPrepared, ct);
+        }
+
+        return (status, detail);
+    }
+
+    /// <summary>Result of the network-bound half of an install: either a short-circuit outcome
+    /// (already installed / copy failed) or a locally-copied installer ready to run.</summary>
+    private sealed class PrepareOutcome
+    {
+        public required string TempDir { get; init; }
+        public (ItemStatus Status, string? Detail)? Completed { get; init; }
+        public string? LocalPath { get; init; }
+        public string? MsiLogPath { get; init; }
+    }
+
+    /// <summary>Already-installed check + copy to a local temp folder. Network-bound, safe to run
+    /// concurrently with another item's (local) install.</summary>
+    private async Task<PrepareOutcome> PrepareAsync(SessionItem item, CancellationToken ct)
     {
         var installer = item.Installer ?? throw new InvalidOperationException($"'{item.Name}' heeft geen installer-gegevens.");
         var tempDir = Path.Combine(Path.GetTempPath(), "PCSetup", Guid.NewGuid().ToString("N"));
@@ -81,7 +129,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             if (TryGetAlreadyInstalledMessage(installer.FullPath, isMsi, installer.DisplayName) is { } alreadyInstalledMessage)
             {
                 logger?.WriteLine($"[{item.Name}] {alreadyInstalledMessage}");
-                return (ItemStatus.AlreadyInstalled, alreadyInstalledMessage);
+                return new PrepareOutcome { TempDir = tempDir, Completed = (ItemStatus.AlreadyInstalled, alreadyInstalledMessage) };
             }
 
             var localPath = Path.Combine(tempDir, installer.FileName);
@@ -94,7 +142,27 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             logger?.WriteLine($"[{item.Name}] Kopiëren voltooid: {sizeMb:N1} MB in {copyStopwatch.Elapsed.TotalSeconds:N1}s.");
 
             var msiLogPath = isMsi ? Path.Combine(tempDir, "msiexec.log") : null;
-            var psi = BuildProcessStartInfo(localPath, installer.SilentArgs, msiLogPath);
+            return new PrepareOutcome { TempDir = tempDir, LocalPath = localPath, MsiLogPath = msiLogPath };
+        }
+        catch (Exception ex)
+        {
+            logger?.WriteLine($"[{item.Name}] Fout tijdens kopiëren: {ex.Message}");
+            return new PrepareOutcome { TempDir = tempDir, Completed = (ItemStatus.Failed, ex.Message) };
+        }
+    }
+
+    /// <summary>Runs the already-copied installer (or resolves a short-circuit outcome from Prepare) and cleans up its temp folder.</summary>
+    private async Task<(ItemStatus Status, string? Detail)> ExecutePreparedAsync(SessionItem item, PrepareOutcome prepared, CancellationToken ct)
+    {
+        if (prepared.Completed is { } completed)
+        {
+            TryDeleteDirectory(prepared.TempDir);
+            return completed;
+        }
+
+        try
+        {
+            var psi = BuildProcessStartInfo(prepared.LocalPath!, item.Installer!.SilentArgs, prepared.MsiLogPath);
 
             logger?.WriteLine($"[{item.Name}] Installer starten: \"{psi.FileName}\" {psi.Arguments}");
             var runStopwatch = Stopwatch.StartNew();
@@ -109,9 +177,9 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             if (success) return (ItemStatus.Succeeded, null);
 
             var error = $"Installer gaf exitcode {process.ExitCode}";
-            if (msiLogPath is not null && File.Exists(msiLogPath))
+            if (prepared.MsiLogPath is not null && File.Exists(prepared.MsiLogPath))
             {
-                var savedLogPath = PersistMsiLog(item.Name, msiLogPath);
+                var savedLogPath = PersistMsiLog(item.Name, prepared.MsiLogPath);
                 if (savedLogPath is not null)
                 {
                     logger?.WriteLine($"[{item.Name}] Msiexec-logbestand bewaard: \"{savedLogPath}\"");
@@ -128,8 +196,8 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         }
         finally
         {
-            TryDeleteDirectory(tempDir);
-            logger?.WriteLine($"[{item.Name}] Tijdelijke map opgeruimd: \"{tempDir}\"");
+            TryDeleteDirectory(prepared.TempDir);
+            logger?.WriteLine($"[{item.Name}] Tijdelijke map opgeruimd: \"{prepared.TempDir}\"");
         }
     }
 
