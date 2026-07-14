@@ -2,10 +2,10 @@ using DeployTool.Core.Models;
 
 namespace DeployTool.Core.Services;
 
-/// <summary>Scans Shortcuts\ on the share for .url/.lnk files. Same drop-in UX as installers — no JSON.</summary>
+/// <summary>Scans Shortcuts\ on the share for .url/.lnk/.exe files. Same drop-in UX as installers — no JSON.</summary>
 public sealed class ShortcutCatalogService(ShareLayout layout)
 {
-    private static readonly string[] Extensions = [".url", ".lnk"];
+    private static readonly string[] Extensions = [".url", ".lnk", ".exe"];
 
     public Task<List<ShortcutCatalogEntry>> DiscoverAsync(CancellationToken ct = default)
     {

@@ -16,7 +16,7 @@ Windows-app (WPF/.NET) om nieuwe of te herinstalleren pc's in één keer voor te
 <share-root>\
  ├─ App\                    → de gepubliceerde app zelf (vanaf hier gestart)
  ├─ Installers\             → installer-bestanden (.exe / .msi), gewoon erin zetten
- ├─ Shortcuts\               → .url / .lnk bestanden, worden automatisch gedetecteerd
+ ├─ Shortcuts\               → .url / .lnk / .exe bestanden, worden automatisch gedetecteerd
  ├─ Config\
  │   ├─ installers.json      → metadata per installer (naam, silent-switch, categorie, standaard)
  │   └─ item-defaults.json   → "standaard aangevinkt" voor snelkoppelingen/instellingen
@@ -24,7 +24,7 @@ Windows-app (WPF/.NET) om nieuwe of te herinstalleren pc's in één keer voor te
      └─ {computernaam}_{datum_tijd}.log
 ```
 
-Standaard share-root: `\\192.168.0.24\Sabbe\deploy map` (zie `DeployTool/App.xaml.cs`, `DefaultShareRoot`). Override lokaal via de omgevingsvariabele `DEPLOYTOOL_SHARE_ROOT` of een eerste command-line argument.
+Standaard share-root: `\\jdstore\Installatie\# VOORINSTALLATIE\deploy map` (zie `DeployTool/App.xaml.cs`, `DefaultShareRoot`). Override lokaal via de omgevingsvariabele `DEPLOYTOOL_SHARE_ROOT` of een eerste command-line argument.
 
 ## Software toevoegen
 
@@ -42,7 +42,7 @@ Dit wordt centraal opgeslagen in `Config\installers.json` en geldt voor elke pc 
 
 ## Snelkoppelingen toevoegen
 
-Zet een `.url`- of `.lnk`-bestand rechtstreeks in `Shortcuts\` op de share — zelfde principe als installers, geen configuratie nodig. Bij uitvoeren wordt het bestand gekopieerd naar het bureaublad van de huidige gebruiker.
+Zet een `.url`-, `.lnk`- of `.exe`-bestand rechtstreeks in `Shortcuts\` op de share — zelfde principe als installers, geen configuratie nodig. Bij uitvoeren wordt het bestand gewoon gekopieerd naar het bureaublad van de huidige gebruiker (geen installatie, geen silent-switches — handig voor bv. een TeamViewer QuickSupport-exe voor hulp op afstand).
 
 ## Instellingen toevoegen
 
@@ -79,7 +79,7 @@ De app vereist adminrechten (zie `app.manifest`, `requireAdministrator`) — bij
 ## Publiceren (deploy naar de fileserver)
 
 ```powershell
-dotnet publish DeployTool\DeployTool.csproj -p:PublishProfile=FolderProfile -o "\\192.168.0.24\Sabbe\deploy map\App"
+dotnet publish DeployTool\DeployTool.csproj -p:PublishProfile=FolderProfile -o "\\jdstore\Installatie\# VOORINSTALLATIE\deploy map\App"
 ```
 
 Self-contained + ReadyToRun (win-x64) — een pc heeft dus geen .NET-runtime nodig, en de app start snel op ook al draait ze rechtstreeks vanaf het netwerk. Zie `DeployTool/Properties/PublishProfiles/FolderProfile.pubxml`.

@@ -2,7 +2,7 @@ using DeployTool.Core.Models;
 
 namespace DeployTool.Core.Services;
 
-/// <summary>Copies a .url/.lnk shortcut file as-is onto the current user's desktop.</summary>
+/// <summary>Copies a .url/.lnk/.exe shortcut file as-is onto the current user's desktop.</summary>
 public sealed class ShortcutPlacementService
 {
     public void Place(ShortcutCatalogEntry entry)

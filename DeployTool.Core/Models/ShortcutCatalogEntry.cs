@@ -1,6 +1,6 @@
 namespace DeployTool.Core.Models;
 
-/// <summary>A .url or .lnk file found in Shortcuts\ on the share — dropped in, no config needed.</summary>
+/// <summary>A .url, .lnk or .exe file found in Shortcuts\ on the share — dropped in, no config needed.</summary>
 public sealed class ShortcutCatalogEntry
 {
     public required string FileName { get; init; }
