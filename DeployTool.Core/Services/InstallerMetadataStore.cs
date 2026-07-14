@@ -1,26 +1,26 @@
-using System.Text.Json;
+using System.Web.Script.Serialization;
 using DeployTool.Core.Models;
+using DeployTool.Core.Polyfills;
 
 namespace DeployTool.Core.Services;
 
 /// <summary>Reads/writes Config\installers.json — the shared metadata for all installers, used by all PCs.</summary>
 public sealed class InstallerMetadataStore(ShareLayout layout)
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+    private static readonly JavaScriptSerializer Serializer = new();
 
     public async Task<List<InstallerDefinition>> LoadAsync(CancellationToken ct = default)
     {
         if (!File.Exists(layout.InstallersJsonPath)) return [];
-        using var stream = File.OpenRead(layout.InstallersJsonPath);
-        var items = await JsonSerializer.DeserializeAsync<List<InstallerDefinition>>(stream, Options, ct);
-        return items ?? [];
+        var json = await Task.Run(() => File.ReadAllText(layout.InstallersJsonPath), ct);
+        return Serializer.Deserialize<List<InstallerDefinition>>(json) ?? [];
     }
 
     public async Task SaveAsync(List<InstallerDefinition> definitions, CancellationToken ct = default)
     {
         Directory.CreateDirectory(layout.ConfigDir);
-        using var stream = File.Create(layout.InstallersJsonPath);
-        await JsonSerializer.SerializeAsync(stream, definitions, Options, ct);
+        var json = JsonIndenter.Indent(Serializer.Serialize(definitions));
+        await Task.Run(() => File.WriteAllText(layout.InstallersJsonPath, json), ct);
     }
 
     /// <summary>Adds or replaces one definition by FileName and persists the full list.</summary>

@@ -46,14 +46,14 @@ public sealed class SettingsCatalogService
                 // w32tm /resync needs the W32Time service running — on a fresh client it's
                 // Manual (Triggered) and often stopped, which fails resync with 0x80070426.
                 var status = await RunAsync("sc.exe", "query w32time", ct);
-                if (!status.Contains("RUNNING", StringComparison.OrdinalIgnoreCase))
+                if (status.IndexOf("RUNNING", StringComparison.OrdinalIgnoreCase) < 0)
                 {
                     await RunAsync("sc.exe", "start w32time", ct);
                     for (var i = 0; i < 10; i++)
                     {
                         await Task.Delay(300, ct);
                         status = await RunAsync("sc.exe", "query w32time", ct);
-                        if (status.Contains("RUNNING", StringComparison.OrdinalIgnoreCase)) break;
+                        if (status.IndexOf("RUNNING", StringComparison.OrdinalIgnoreCase) >= 0) break;
                     }
                 }
 

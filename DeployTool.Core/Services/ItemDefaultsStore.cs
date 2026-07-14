@@ -1,4 +1,5 @@
-using System.Text.Json;
+using System.Web.Script.Serialization;
+using DeployTool.Core.Polyfills;
 
 namespace DeployTool.Core.Services;
 
@@ -9,14 +10,13 @@ namespace DeployTool.Core.Services;
 /// </summary>
 public sealed class ItemDefaultsStore(ShareLayout layout)
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
+    private static readonly JavaScriptSerializer Serializer = new();
 
     public async Task<Dictionary<string, bool>> LoadAsync(CancellationToken ct = default)
     {
         if (!File.Exists(layout.ItemDefaultsJsonPath)) return [];
-        using var stream = File.OpenRead(layout.ItemDefaultsJsonPath);
-        var defaults = await JsonSerializer.DeserializeAsync<Dictionary<string, bool>>(stream, Options, ct);
-        return defaults ?? [];
+        var json = await Task.Run(() => File.ReadAllText(layout.ItemDefaultsJsonPath), ct);
+        return Serializer.Deserialize<Dictionary<string, bool>>(json) ?? [];
     }
 
     public async Task SetAsync(string key, bool isDefault, CancellationToken ct = default)
@@ -25,7 +25,7 @@ public sealed class ItemDefaultsStore(ShareLayout layout)
         defaults[key] = isDefault;
 
         Directory.CreateDirectory(layout.ConfigDir);
-        using var stream = File.Create(layout.ItemDefaultsJsonPath);
-        await JsonSerializer.SerializeAsync(stream, defaults, Options, ct);
+        var json = JsonIndenter.Indent(Serializer.Serialize(defaults));
+        await Task.Run(() => File.WriteAllText(layout.ItemDefaultsJsonPath, json), ct);
     }
 }
