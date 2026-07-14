@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using DeployTool.Core.Models;
+using DeployTool.Core.Polyfills;
 using Microsoft.Win32;
 
 namespace DeployTool.Core.Services;
@@ -70,6 +71,7 @@ public sealed class SettingsCatalogService
                 // modern Settings app and Control Panel show the same value.
                 var list = await RunAsync("powercfg.exe", "/list", ct);
                 var guids = Regex.Matches(list, @"Power Scheme GUID:\s*([0-9a-fA-F-]{36})")
+                    .Cast<Match>()
                     .Select(m => m.Groups[1].Value)
                     .ToList();
 
@@ -113,8 +115,8 @@ public sealed class SettingsCatalogService
         };
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Kon {fileName} niet starten.");
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
+        var stdout = await process.StandardOutput.ReadToEndAsync();
+        var stderr = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync(ct);
 
         if (process.ExitCode != 0)

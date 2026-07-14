@@ -11,7 +11,7 @@ public sealed class InstallerMetadataStore(ShareLayout layout)
     public async Task<List<InstallerDefinition>> LoadAsync(CancellationToken ct = default)
     {
         if (!File.Exists(layout.InstallersJsonPath)) return [];
-        await using var stream = File.OpenRead(layout.InstallersJsonPath);
+        using var stream = File.OpenRead(layout.InstallersJsonPath);
         var items = await JsonSerializer.DeserializeAsync<List<InstallerDefinition>>(stream, Options, ct);
         return items ?? [];
     }
@@ -19,7 +19,7 @@ public sealed class InstallerMetadataStore(ShareLayout layout)
     public async Task SaveAsync(List<InstallerDefinition> definitions, CancellationToken ct = default)
     {
         Directory.CreateDirectory(layout.ConfigDir);
-        await using var stream = File.Create(layout.InstallersJsonPath);
+        using var stream = File.Create(layout.InstallersJsonPath);
         await JsonSerializer.SerializeAsync(stream, definitions, Options, ct);
     }
 

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using DeployTool.Core.Models;
+using DeployTool.Core.Polyfills;
 using Microsoft.Win32;
 
 namespace DeployTool.Core.Services;
@@ -327,9 +328,9 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 
     private static async Task CopyFileAsync(string source, string destination, CancellationToken ct)
     {
-        await using var src = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-        await using var dst = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-        await src.CopyToAsync(dst, ct);
+        using var src = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        using var dst = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+        await src.CopyToAsync(dst, 81920, ct);
     }
 
     private static void TryDeleteDirectory(string path)

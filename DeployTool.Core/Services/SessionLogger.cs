@@ -6,7 +6,7 @@ namespace DeployTool.Core.Services;
 public sealed class SessionLogger : IDisposable
 {
     private readonly StreamWriter _writer;
-    private readonly Lock _lock = new();
+    private readonly object _lock = new();
 
     public string LogPath { get; }
 

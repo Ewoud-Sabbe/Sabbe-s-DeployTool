@@ -14,7 +14,7 @@ public sealed class ItemDefaultsStore(ShareLayout layout)
     public async Task<Dictionary<string, bool>> LoadAsync(CancellationToken ct = default)
     {
         if (!File.Exists(layout.ItemDefaultsJsonPath)) return [];
-        await using var stream = File.OpenRead(layout.ItemDefaultsJsonPath);
+        using var stream = File.OpenRead(layout.ItemDefaultsJsonPath);
         var defaults = await JsonSerializer.DeserializeAsync<Dictionary<string, bool>>(stream, Options, ct);
         return defaults ?? [];
     }
@@ -25,7 +25,7 @@ public sealed class ItemDefaultsStore(ShareLayout layout)
         defaults[key] = isDefault;
 
         Directory.CreateDirectory(layout.ConfigDir);
-        await using var stream = File.Create(layout.ItemDefaultsJsonPath);
+        using var stream = File.Create(layout.ItemDefaultsJsonPath);
         await JsonSerializer.SerializeAsync(stream, defaults, Options, ct);
     }
 }
