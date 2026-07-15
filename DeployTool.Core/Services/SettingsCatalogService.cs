@@ -209,7 +209,7 @@ public sealed class SettingsCatalogService
         if (string.IsNullOrWhiteSpace(command))
             throw new InvalidOperationException("geen uninstall-commando gevonden in het register.");
 
-        var (fileName, arguments) = ParseUninstallCommand(command);
+        var (fileName, arguments) = ParseUninstallCommand(command!);
 
         // MSI-based uninstalls have a reliable silent switch — force it even if the registry
         // string itself wasn't already silent (most QuietUninstallString values are, but plain
@@ -235,7 +235,7 @@ public sealed class SettingsCatalogService
     private static (string FileName, string Arguments) ParseUninstallCommand(string command)
     {
         command = command.Trim();
-        if (command.StartsWith('"'))
+        if (command.Length > 0 && command[0] == '"')
         {
             var closingQuote = command.IndexOf('"', 1);
             if (closingQuote > 0)
