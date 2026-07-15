@@ -100,6 +100,34 @@ public sealed class SettingsCatalogService
                 return Task.CompletedTask;
             }
         },
+        new SettingAction
+        {
+            Name = "Bloatware verwijderen (McAfee, NordVPN)",
+            DefaultSelected = true,
+            Execute = async ct =>
+            {
+                var matches = FindInstalledPrograms(name =>
+                    name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    name.IndexOf("nordvpn", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                var failures = new List<string>();
+                foreach (var program in matches)
+                {
+                    try
+                    {
+                        await UninstallProgramAsync(program, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{program.DisplayName}: {ex.Message}");
+                    }
+                }
+
+                if (failures.Count > 0)
+                    throw new InvalidOperationException(
+                        $"{failures.Count} van {matches.Count} programma('s) niet volledig verwijderd: {string.Join("; ", failures)}");
+            }
+        },
     ];
 
     private static async Task<string> RunAsync(string fileName, string arguments, CancellationToken ct)
@@ -128,4 +156,91 @@ public sealed class SettingsCatalogService
 
     [DllImport("shell32.dll")]
     private static extern void SHChangeNotify(uint wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+    private sealed record InstalledProgram(string DisplayName, string? UninstallString, string? QuietUninstallString);
+
+    /// <summary>Scans the Uninstall registry (both bitness views + HKCU) for entries whose DisplayName matches.
+    /// A single vendor — McAfee especially — can register several separate entries.</summary>
+    private static List<InstalledProgram> FindInstalledPrograms(Func<string, bool> nameMatches)
+    {
+        var results = new List<InstalledProgram>();
+
+        (RegistryHive Hive, RegistryView View)[] locations =
+        [
+            (RegistryHive.LocalMachine, RegistryView.Registry64),
+            (RegistryHive.LocalMachine, RegistryView.Registry32),
+            (RegistryHive.CurrentUser, RegistryView.Registry64),
+        ];
+
+        foreach (var (hive, view) in locations)
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+            using var uninstallKey = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
+            if (uninstallKey is null) continue;
+
+            foreach (var subKeyName in uninstallKey.GetSubKeyNames())
+            {
+                using var subKey = uninstallKey.OpenSubKey(subKeyName);
+                if (subKey?.GetValue("DisplayName") is not string displayName || string.IsNullOrWhiteSpace(displayName))
+                    continue;
+
+                if (!nameMatches(displayName)) continue;
+
+                results.Add(new InstalledProgram(
+                    displayName,
+                    subKey.GetValue("UninstallString") as string,
+                    subKey.GetValue("QuietUninstallString") as string));
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Runs the program's own registered uninstaller silently. Vendor uninstallers report success
+    /// with wildly inconsistent exit codes, so instead of trusting the exit code, this re-checks
+    /// the registry afterwards — if the entry is gone, it worked, regardless of what it returned.
+    /// </summary>
+    private static async Task UninstallProgramAsync(InstalledProgram program, CancellationToken ct)
+    {
+        var command = program.QuietUninstallString ?? program.UninstallString;
+        if (string.IsNullOrWhiteSpace(command))
+            throw new InvalidOperationException("geen uninstall-commando gevonden in het register.");
+
+        var (fileName, arguments) = ParseUninstallCommand(command);
+
+        // MSI-based uninstalls have a reliable silent switch — force it even if the registry
+        // string itself wasn't already silent (most QuietUninstallString values are, but plain
+        // UninstallString rarely is).
+        if (fileName.EndsWith("msiexec.exe", StringComparison.OrdinalIgnoreCase) &&
+            arguments.IndexOf("/qn", StringComparison.OrdinalIgnoreCase) < 0 &&
+            arguments.IndexOf("/quiet", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            arguments += " /qn /norestart";
+        }
+
+        var psi = new ProcessStartInfo(fileName, arguments) { UseShellExecute = false, CreateNoWindow = true };
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon de uninstaller niet starten.");
+        await process.WaitForExitAsync(ct);
+
+        var stillPresent = FindInstalledPrograms(n => string.Equals(n, program.DisplayName, StringComparison.OrdinalIgnoreCase)).Count > 0;
+        if (stillPresent)
+            throw new InvalidOperationException($"nog steeds aanwezig na uninstall-poging (exitcode {process.ExitCode}).");
+    }
+
+    /// <summary>Splits a registry uninstall command into its executable and argument string — handles
+    /// both a quoted path ("C:\...\uninstall.exe" -args) and an unquoted one (MsiExec.exe /X{guid}).</summary>
+    private static (string FileName, string Arguments) ParseUninstallCommand(string command)
+    {
+        command = command.Trim();
+        if (command.StartsWith('"'))
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            if (closingQuote > 0)
+                return (command[1..closingQuote], command[(closingQuote + 1)..].Trim());
+        }
+
+        var spaceIndex = command.IndexOf(' ');
+        return spaceIndex < 0 ? (command, string.Empty) : (command[..spaceIndex], command[(spaceIndex + 1)..].Trim());
+    }
 }
