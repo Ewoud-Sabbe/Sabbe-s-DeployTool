@@ -268,14 +268,24 @@ public sealed class SettingsCatalogService(ShareLayout layout)
 
         var (fileName, arguments) = ParseUninstallCommand(command!);
 
-        // MSI-based uninstalls have a reliable silent switch — force it even if the registry
-        // string itself wasn't already silent (most QuietUninstallString values are, but plain
-        // UninstallString rarely is).
-        if (fileName.EndsWith("msiexec.exe", StringComparison.OrdinalIgnoreCase) &&
-            arguments.IndexOf("/qn", StringComparison.OrdinalIgnoreCase) < 0 &&
-            arguments.IndexOf("/quiet", StringComparison.OrdinalIgnoreCase) < 0)
+        if (fileName.EndsWith("msiexec.exe", StringComparison.OrdinalIgnoreCase))
         {
-            arguments += " /qn /norestart";
+            // Some vendors (NordVPN's Advanced Installer package among them) register an
+            // UninstallString using /I{guid} (install/repair) instead of /X{guid} (uninstall) —
+            // running it as-is just silently repairs/reinstalls the product, which is why it
+            // reports success (exit 0) while the program is still there afterwards. /X is the
+            // standard uninstall verb every MSI package must support, regardless of what the
+            // (buggy) registry string says.
+            arguments = Regex.Replace(arguments, @"/I\{", "/X{", RegexOptions.IgnoreCase);
+
+            // MSI-based uninstalls have a reliable silent switch — force it even if the registry
+            // string itself wasn't already silent (most QuietUninstallString values are, but
+            // plain UninstallString rarely is).
+            if (arguments.IndexOf("/qn", StringComparison.OrdinalIgnoreCase) < 0 &&
+                arguments.IndexOf("/quiet", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                arguments += " /qn /norestart";
+            }
         }
 
         // Inno Setup uninstallers (NordVPN among many others) are named unins###.exe by
