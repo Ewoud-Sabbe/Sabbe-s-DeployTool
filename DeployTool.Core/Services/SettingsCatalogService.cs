@@ -111,42 +111,51 @@ public sealed class SettingsCatalogService(ShareLayout layout)
 
                 // McAfee's own per-product uninstallers (LiveSafe, WebAdvisor, Safe Connect, ...)
                 // essentially never honor silent flags — they open an interactive wizard
-                // regardless of what's passed. mccleanup.exe (McAfee's own cleanup engine,
-                // normally bundled inside MCPR.exe) is the only reliable fully-silent path; see
-                // README for the one-time steps to extract and stage it in Config\ on the share.
-                var mccleanupSource = Path.Combine(layout.ConfigDir, "mccleanup.exe");
-                if (!File.Exists(mccleanupSource))
+                // regardless of what's passed. McAfee's own cleanup engine (normally bundled
+                // inside their MCPR removal tool, invoked here the same way MCPR's own
+                // StartCleanup.bat does it) is the only reliable fully-silent path. It needs its
+                // whole folder — not just the exe — staged at Config\McCleanup\ on the share; see
+                // README for the one-time extraction steps.
+                var mccleanupSourceDir = Path.Combine(layout.ConfigDir, "McCleanup");
+                var mcClnUiSource = Path.Combine(mccleanupSourceDir, "McClnUI.exe");
+                if (!File.Exists(mcClnUiSource))
                 {
                     throw new InvalidOperationException(
-                        $"{installed.Count} McAfee-programma('s) gevonden, maar \"mccleanup.exe\" ontbreekt in Config\\ op de share " +
+                        $"{installed.Count} McAfee-programma('s) gevonden, maar \"McClnUI.exe\" ontbreekt in Config\\McCleanup\\ op de share " +
                         "— zonder dat tool kan McAfee niet stil verwijderd worden (zie README).");
                 }
 
-                var localPath = Path.Combine(Path.GetTempPath(), "PCSetup", "mccleanup.exe");
-                Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
-                File.Copy(mccleanupSource, localPath, overwrite: true);
+                var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
+                CopyDirectory(mccleanupSourceDir, localDir);
+                var localMcClnUi = Path.Combine(localDir, "McClnUI.exe");
 
+                // Exact same component list and flags as McAfee's own StartCleanup.bat.
                 const string components = "StopServices,MFSY,PEF,MXD,CSP,Sustainability,MOCP,MFP,APPSTATS,Auth,EMproxy,FWdiver,HW,MAS,MAT,MBK,MCPR,McProxy,McSvcHost,VUL,MHN,MNA,MOBK,MPFP,MPFPCU,MPS,SHRED,MPSCU,MQC,MQCCU,MSAD,MSHR,MSK,MSKCU,MWL,NMC,RedirSvc,VS,REMEDIATION,MSC,YAP,TRUEKEY,LAM,PCB,Symlink,SafeConnect,MGS,WMIRemover,RESIDUE";
 
                 try
                 {
-                    var psi = new ProcessStartInfo(localPath, $"-p {components} -v -s") { UseShellExecute = false, CreateNoWindow = true };
-                    using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon mccleanup.exe niet starten.");
+                    var psi = new ProcessStartInfo(localMcClnUi, $"-p {components} -s")
+                    {
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WorkingDirectory = localDir,
+                    };
+                    using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon McClnUI.exe niet starten.");
                     await process.WaitForExitAsync(ct);
 
-                    // mccleanup's own exit code isn't a reliable success signal either — verify
-                    // by re-checking the registry, same as the generic uninstall path.
+                    // Exit code isn't a reliable success signal either — verify by re-checking
+                    // the registry, same as the generic uninstall path.
                     var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
                     if (stillPresent.Count > 0)
                     {
                         throw new InvalidOperationException(
-                            $"nog {stillPresent.Count} vermelding(en) aanwezig na mccleanup (exitcode {process.ExitCode}): "
+                            $"nog {stillPresent.Count} vermelding(en) aanwezig na McClnUI (exitcode {process.ExitCode}): "
                             + string.Join(", ", stillPresent.Select(p => p.DisplayName)));
                     }
                 }
                 finally
                 {
-                    TryDeleteFile(localPath);
+                    TryDeleteDirectory(localDir);
                 }
             }
         },
@@ -267,13 +276,22 @@ public sealed class SettingsCatalogService(ShareLayout layout)
             arguments += " /qn /norestart";
         }
 
+        // Inno Setup uninstallers (NordVPN among many others) are named unins###.exe by
+        // convention and use /VERYSILENT, not /qn — without it they just show a confirmation
+        // dialog, which with no window renders as "ran instantly, exit 0, did nothing".
+        if (Regex.IsMatch(Path.GetFileName(fileName), @"^unins\d*\.exe$", RegexOptions.IgnoreCase) &&
+            arguments.IndexOf("silent", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            arguments += " /VERYSILENT /SUPPRESSMSGBOXES /NORESTART";
+        }
+
         var psi = new ProcessStartInfo(fileName, arguments) { UseShellExecute = false, CreateNoWindow = true };
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon de uninstaller niet starten.");
         await process.WaitForExitAsync(ct);
 
         var stillPresent = FindInstalledPrograms(n => string.Equals(n, program.DisplayName, StringComparison.OrdinalIgnoreCase)).Count > 0;
         if (stillPresent)
-            throw new InvalidOperationException($"nog steeds aanwezig na uninstall-poging (exitcode {process.ExitCode}).");
+            throw new InvalidOperationException($"nog steeds aanwezig na uninstall-poging (exitcode {process.ExitCode}, commando: \"{fileName}\" {arguments}).");
     }
 
     /// <summary>Splits a registry uninstall command into its executable and argument string — handles
@@ -292,11 +310,23 @@ public sealed class SettingsCatalogService(ShareLayout layout)
         return spaceIndex < 0 ? (command, string.Empty) : (command[..spaceIndex], command[(spaceIndex + 1)..].Trim());
     }
 
-    private static void TryDeleteFile(string path)
+    private static void CopyDirectory(string sourceDir, string destinationDir)
+    {
+        Directory.CreateDirectory(destinationDir);
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            var destFile = Path.Combine(destinationDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
+            File.Copy(file, destFile, overwrite: true);
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
     {
         try
         {
-            if (File.Exists(path)) File.Delete(path);
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
         }
         catch
         {
