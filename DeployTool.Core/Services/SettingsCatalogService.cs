@@ -7,7 +7,7 @@ using Microsoft.Win32;
 namespace DeployTool.Core.Services;
 
 /// <summary>Hardcoded, extensible list of Windows-setting actions. Add new entries here.</summary>
-public sealed class SettingsCatalogService
+public sealed class SettingsCatalogService(ShareLayout layout)
 {
     public List<SettingAction> GetAll() =>
     [
@@ -102,13 +102,61 @@ public sealed class SettingsCatalogService
         },
         new SettingAction
         {
-            Name = "Bloatware verwijderen (McAfee, NordVPN)",
+            Name = "McAfee verwijderen",
             DefaultSelected = true,
             Execute = async ct =>
             {
-                var matches = FindInstalledPrograms(name =>
-                    name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    name.IndexOf("nordvpn", StringComparison.OrdinalIgnoreCase) >= 0);
+                var installed = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (installed.Count == 0) return;
+
+                // McAfee's own per-product uninstallers (LiveSafe, WebAdvisor, Safe Connect, ...)
+                // essentially never honor silent flags — they open an interactive wizard
+                // regardless of what's passed. mccleanup.exe (McAfee's own cleanup engine,
+                // normally bundled inside MCPR.exe) is the only reliable fully-silent path; see
+                // README for the one-time steps to extract and stage it in Config\ on the share.
+                var mccleanupSource = Path.Combine(layout.ConfigDir, "mccleanup.exe");
+                if (!File.Exists(mccleanupSource))
+                {
+                    throw new InvalidOperationException(
+                        $"{installed.Count} McAfee-programma('s) gevonden, maar \"mccleanup.exe\" ontbreekt in Config\\ op de share " +
+                        "— zonder dat tool kan McAfee niet stil verwijderd worden (zie README).");
+                }
+
+                var localPath = Path.Combine(Path.GetTempPath(), "PCSetup", "mccleanup.exe");
+                Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+                File.Copy(mccleanupSource, localPath, overwrite: true);
+
+                const string components = "StopServices,MFSY,PEF,MXD,CSP,Sustainability,MOCP,MFP,APPSTATS,Auth,EMproxy,FWdiver,HW,MAS,MAT,MBK,MCPR,McProxy,McSvcHost,VUL,MHN,MNA,MOBK,MPFP,MPFPCU,MPS,SHRED,MPSCU,MQC,MQCCU,MSAD,MSHR,MSK,MSKCU,MWL,NMC,RedirSvc,VS,REMEDIATION,MSC,YAP,TRUEKEY,LAM,PCB,Symlink,SafeConnect,MGS,WMIRemover,RESIDUE";
+
+                try
+                {
+                    var psi = new ProcessStartInfo(localPath, $"-p {components} -v -s") { UseShellExecute = false, CreateNoWindow = true };
+                    using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon mccleanup.exe niet starten.");
+                    await process.WaitForExitAsync(ct);
+
+                    // mccleanup's own exit code isn't a reliable success signal either — verify
+                    // by re-checking the registry, same as the generic uninstall path.
+                    var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (stillPresent.Count > 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"nog {stillPresent.Count} vermelding(en) aanwezig na mccleanup (exitcode {process.ExitCode}): "
+                            + string.Join(", ", stillPresent.Select(p => p.DisplayName)));
+                    }
+                }
+                finally
+                {
+                    TryDeleteFile(localPath);
+                }
+            }
+        },
+        new SettingAction
+        {
+            Name = "NordVPN verwijderen",
+            DefaultSelected = true,
+            Execute = async ct =>
+            {
+                var matches = FindInstalledPrograms(name => name.IndexOf("nordvpn", StringComparison.OrdinalIgnoreCase) >= 0);
 
                 var failures = new List<string>();
                 foreach (var program in matches)
@@ -242,5 +290,17 @@ public sealed class SettingsCatalogService
 
         var spaceIndex = command.IndexOf(' ');
         return spaceIndex < 0 ? (command, string.Empty) : (command[..spaceIndex], command[(spaceIndex + 1)..].Trim());
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // best-effort cleanup — a locked file here shouldn't fail the session
+        }
     }
 }

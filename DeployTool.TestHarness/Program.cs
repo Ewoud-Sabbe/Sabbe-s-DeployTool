@@ -11,7 +11,7 @@ Console.WriteLine("Fileserver connectie OK.");
 var metadataStore = new InstallerMetadataStore(layout);
 var installerCatalog = new InstallerCatalogService(layout, metadataStore);
 var shortcutCatalog = new ShortcutCatalogService(layout);
-var settingsCatalog = new SettingsCatalogService();
+var settingsCatalog = new SettingsCatalogService(layout);
 
 var installers = await installerCatalog.DiscoverAsync();
 Console.WriteLine($"\nGevonden installers ({installers.Count}):");
