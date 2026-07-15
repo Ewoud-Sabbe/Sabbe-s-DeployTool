@@ -16,7 +16,7 @@ public partial class MainViewModel : ObservableObject
     private readonly InstallerMetadataStore _metadataStore;
     private readonly InstallerCatalogService _installerCatalog;
     private readonly ShortcutCatalogService _shortcutCatalog;
-    private readonly SettingsCatalogService _settingsCatalog = new();
+    private readonly SettingsCatalogService _settingsCatalog;
     private readonly ShortcutPlacementService _shortcutPlacer = new();
     private readonly ItemDefaultsStore _itemDefaultsStore;
 
@@ -49,6 +49,7 @@ public partial class MainViewModel : ObservableObject
         _metadataStore = new InstallerMetadataStore(_layout);
         _installerCatalog = new InstallerCatalogService(_layout, _metadataStore);
         _shortcutCatalog = new ShortcutCatalogService(_layout);
+        _settingsCatalog = new SettingsCatalogService(_layout);
         _itemDefaultsStore = new ItemDefaultsStore(_layout);
     }
 

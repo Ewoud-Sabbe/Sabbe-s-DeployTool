@@ -19,7 +19,8 @@ Windows-app (WPF/.NET) om nieuwe of te herinstalleren pc's in één keer voor te
  ├─ Shortcuts\               → .url / .lnk / .exe bestanden, worden automatisch gedetecteerd
  ├─ Config\
  │   ├─ installers.json      → metadata per installer (naam, silent-switch, categorie, standaard)
- │   └─ item-defaults.json   → "standaard aangevinkt" voor snelkoppelingen/instellingen
+ │   ├─ item-defaults.json   → "standaard aangevinkt" voor snelkoppelingen/instellingen
+ │   └─ mccleanup.exe        → (optioneel) nodig voor de "McAfee verwijderen"-instelling, zie verderop
  └─ Logs\
      └─ {computernaam}_{datum_tijd}.log
 ```
@@ -47,6 +48,21 @@ Zet een `.url`-, `.lnk`- of `.exe`-bestand rechtstreeks in `Shortcuts\` op de sh
 ## Instellingen toevoegen
 
 Instellingen zijn hardcoded C#-acties in [`DeployTool.Core/Services/SettingsCatalogService.cs`](DeployTool.Core/Services/SettingsCatalogService.cs) — geen JSON-bestand. Voeg een nieuwe `SettingAction` toe aan de lijst (naam + een `Execute`-actie) om een instelling toe te voegen; vereist een codewijziging en herpublicatie.
+
+## Bloatware verwijderen (McAfee, NordVPN)
+
+Twee losse instellingen — **"McAfee verwijderen"** en **"NordVPN verwijderen"** — zoeken bij het opstarten van een sessie in het register naar elke geïnstalleerde toepassing waarvan de naam "mcafee" resp. "nordvpn" bevat en verwijderen ze stil. McAfee registreert op OEM-pc's vaak meerdere losse programma's tegelijk (LiveSafe, WebAdvisor, Safe Connect, ...) — die worden allemaal meegenomen, niet enkel de eerste.
+
+NordVPN gebruikt zijn eigen geregistreerde uninstaller (meestal silent-vriendelijk). **McAfee's eigen uninstallers negeren silent-vlaggen zo goed als altijd** en openen een interactief venster — daarom gebruikt de "McAfee verwijderen"-instelling in plaats daarvan `mccleanup.exe`, McAfee's eigen (niet apart gepubliceerde) opruimtool die wél volledig stil werkt via de command line.
+
+**Eenmalig `mccleanup.exe` verkrijgen en op de share zetten:**
+1. Download `MCPR.exe` (McAfee Consumer Product Removal tool) van `https://download.mcafee.com/molbin/iss-loc/SupportTools/MCPR/MCPR.exe`.
+2. Start `MCPR.exe` op eender welke Windows-pc (heeft geen McAfee nodig om te draaien).
+3. Zodra het "McAfee Software Removal"-venster verschijnt, kopieer de map `%LocalAppData%\Temp\MCPR\` naar bv. `C:\Downloads\MCPR`.
+4. Annuleer de wizard (niet doorklikken — het bestand is intussen al uitgepakt).
+5. Zet `mccleanup.exe` uit die map in `Config\` op de fileserver-share.
+
+Als `Config\mccleanup.exe` ontbreekt, faalt de "McAfee verwijderen"-instelling met een duidelijke foutmelding in plaats van stilzwijgend niets te doen.
 
 ## Standaardselectie
 
