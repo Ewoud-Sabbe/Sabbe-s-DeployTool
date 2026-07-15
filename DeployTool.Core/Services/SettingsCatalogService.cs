@@ -315,9 +315,10 @@ public sealed class SettingsCatalogService(ShareLayout layout)
     private static void CopyDirectory(string sourceDir, string destinationDir)
     {
         Directory.CreateDirectory(destinationDir);
+        var sourceRoot = sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
         {
-            var relative = Path.GetRelativePath(sourceDir, file);
+            var relative = file.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var destFile = Path.Combine(destinationDir, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
             File.Copy(file, destFile, overwrite: true);
