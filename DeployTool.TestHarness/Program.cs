@@ -11,7 +11,8 @@ Console.WriteLine("Fileserver connectie OK.");
 var metadataStore = new InstallerMetadataStore(layout);
 var installerCatalog = new InstallerCatalogService(layout, metadataStore);
 var shortcutCatalog = new ShortcutCatalogService(layout);
-var settingsCatalog = new SettingsCatalogService(layout);
+var settingsCatalog = new SettingsCatalogService();
+var bloatwareCatalog = new BloatwareCatalogService(layout);
 
 var installers = await installerCatalog.DiscoverAsync();
 Console.WriteLine($"\nGevonden installers ({installers.Count}):");
@@ -27,6 +28,11 @@ var settings = settingsCatalog.GetAll();
 Console.WriteLine($"\nInstellingen ({settings.Count}):");
 foreach (var s in settings)
     Console.WriteLine($"  {s.Name} default={s.DefaultSelected}");
+
+var bloatware = bloatwareCatalog.GetAll();
+Console.WriteLine($"\nBloatware ({bloatware.Count}):");
+foreach (var b in bloatware)
+    Console.WriteLine($"  {b.Name} default={b.DefaultSelected}");
 
 // Build a session: only configured installers + all shortcuts + all settings, all selected.
 var sessionItems = new List<SessionItem>();
@@ -50,6 +56,13 @@ sessionItems.AddRange(settings.Select(s => new SessionItem
     Name = s.Name,
     IsSelected = true,
     Setting = s
+}));
+sessionItems.AddRange(bloatware.Select(b => new SessionItem
+{
+    Kind = SessionItemKind.Bloatware,
+    Name = b.Name,
+    IsSelected = true,
+    Setting = b
 }));
 
 Console.WriteLine($"\nSessie starten met {sessionItems.Count} items...\n");

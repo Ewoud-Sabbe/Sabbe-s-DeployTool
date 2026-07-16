@@ -179,6 +179,16 @@
                     </StackPanel>
                 </Border>
 
+                <Border Style="{StaticResource SectionCard}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,4">
+                            <TextBlock Text="Bloatware" Style="{StaticResource SectionHeaderText}"/>
+                            <TextBlock Text="{Binding Bloatware.Count, StringFormat={}{0} item(en)}" Style="{StaticResource SectionCountText}"/>
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding Bloatware}" ItemTemplate="{StaticResource ItemRowTemplate}"/>
+                    </StackPanel>
+                </Border>
+
             </StackPanel>
         </ScrollViewer>
 
