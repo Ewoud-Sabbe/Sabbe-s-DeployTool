@@ -149,21 +149,29 @@ public sealed class SettingsCatalogService(ShareLayout layout)
                     }
                 }
 
-                // Deliberately not falling back to each remaining entry's own registered
-                // uninstaller here (unlike NordVPN): confirmed on a real machine that McAfee's
-                // core product uninstaller opens an interactive window regardless of flags, and
-                // worse, the app then hangs waiting for that window to close even after the user
-                // finishes it by hand — an unattended session has no way to click it, so it can
-                // only ever get stuck. mccleanup.exe above already silently removes what it can
-                // (e.g. WebAdvisor); whatever's left after that is reported here so it's visible
-                // in the log, without launching anything that could block the session.
+                // For whatever mccleanup.exe didn't get, fall back to each entry's own registered
+                // uninstaller (same generic path "NordVPN verwijderen" uses). For McAfee this
+                // usually means an interactive window — by design here, since someone is expected
+                // to be watching and can just click through it rather than having to go hunt McAfee
+                // down manually afterwards. UninstallProgramAsync's timeout keeps a genuinely stuck
+                // uninstaller from blocking the rest of the session indefinitely either way.
                 var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
-                if (stillPresent.Count > 0)
+                var failures = new List<string>();
+                foreach (var program in stillPresent)
                 {
-                    throw new InvalidOperationException(
-                        $"{stillPresent.Count} programma('s) vereisen handmatige verwijdering (McAfee's eigen uninstaller "
-                        + $"laat zich niet silent aansturen): {string.Join(", ", stillPresent.Select(p => p.DisplayName))}");
+                    try
+                    {
+                        await UninstallProgramAsync(program, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{program.DisplayName}: {ex.Message}");
+                    }
                 }
+
+                if (failures.Count > 0)
+                    throw new InvalidOperationException(
+                        $"{failures.Count} van {stillPresent.Count} resterende programma('s) niet verwijderd: {string.Join("; ", failures)}");
             }
         },
         new SettingAction
@@ -304,7 +312,13 @@ public sealed class SettingsCatalogService(ShareLayout layout)
 
         var psi = new ProcessStartInfo(fileName, arguments) { UseShellExecute = false, CreateNoWindow = true };
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon de uninstaller niet starten.");
-        await process.WaitForExitAsync(ct);
+
+        // Some vendor uninstallers (McAfee's included) show an interactive window regardless of
+        // any silent flag, and on at least one real machine the process never exited even after
+        // the window was closed by hand — this bounds the wait so a single stuck uninstaller
+        // can't block the rest of an unattended session forever. Five minutes is generous enough
+        // for someone to actually click through a wizard if they're sitting there watching.
+        await WaitForExitWithTimeoutAsync(process, TimeSpan.FromMinutes(5), ct);
 
         var stillPresent = FindInstalledPrograms(n => string.Equals(n, program.DisplayName, StringComparison.OrdinalIgnoreCase)).Count > 0;
         if (stillPresent)
@@ -348,6 +362,22 @@ public sealed class SettingsCatalogService(ShareLayout layout)
         catch
         {
             // best-effort cleanup — a locked file here shouldn't fail the session
+        }
+    }
+
+    /// <summary>Waits for a process to exit, but gives up after <paramref name="timeout"/> instead
+    /// of potentially waiting forever on a stuck/hung external process.</summary>
+    private static async Task WaitForExitWithTimeoutAsync(Process process, TimeSpan timeout, CancellationToken ct)
+    {
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        try
+        {
+            await process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"proces reageerde niet binnen {timeout.TotalSeconds:N0}s.");
         }
     }
 }
