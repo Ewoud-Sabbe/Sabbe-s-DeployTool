@@ -151,23 +151,21 @@ public sealed class SettingsCatalogService(ShareLayout layout)
                     }
                 }
 
+                // Deliberately not falling back to each remaining entry's own registered
+                // uninstaller here (unlike NordVPN): confirmed on a real machine that McAfee's
+                // core product uninstaller opens an interactive window regardless of flags, and
+                // worse, the app then hangs waiting for that window to close even after the user
+                // finishes it by hand — an unattended session has no way to click it, so it can
+                // only ever get stuck. mccleanup.exe above already silently removes what it can
+                // (e.g. WebAdvisor); whatever's left after that is reported here so it's visible
+                // in the log, without launching anything that could block the session.
                 var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
-                var failures = new List<string>();
-                foreach (var program in stillPresent)
+                if (stillPresent.Count > 0)
                 {
-                    try
-                    {
-                        await UninstallProgramAsync(program, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        failures.Add($"{program.DisplayName}: {ex.Message}");
-                    }
-                }
-
-                if (failures.Count > 0)
                     throw new InvalidOperationException(
-                        $"{failures.Count} van {stillPresent.Count} resterende programma('s) niet verwijderd: {string.Join("; ", failures)}");
+                        $"{stillPresent.Count} programma('s) vereisen handmatige verwijdering (McAfee's eigen uninstaller "
+                        + $"laat zich niet silent aansturen): {string.Join(", ", stillPresent.Select(p => p.DisplayName))}");
+                }
             }
         },
         new SettingAction
