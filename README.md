@@ -55,14 +55,16 @@ Twee losse instellingen — **"McAfee verwijderen"** en **"NordVPN verwijderen"*
 
 NordVPN gebruikt zijn eigen geregistreerde uninstaller. Die is Inno Setup-gebaseerd (`unins###.exe`) en heeft `/VERYSILENT` nodig — zonder die vlag toont hij een bevestigingsvenster dat zonder zichtbaar venster gewoon niets doet (lijkt op succes: snelle exitcode 0, maar het programma blijft staan). De app herkent dat patroon automatisch en voegt de juiste vlaggen toe.
 
-**McAfee's eigen per-product-uninstallers negeren silent-vlaggen zo goed als altijd** en openen een interactief venster — daarom gebruikt de "McAfee verwijderen"-instelling in plaats daarvan `mccleanup.exe`, McAfee's eigen opruimmotor (normaal verstopt in hun MCPR-verwijdertool), rechtstreeks aangeroepen met dezelfde componentenlijst als McAfee's eigen `StartCleanup.bat`-script. Let op: die map bevat ook `McClnUI.exe`, de grafische wrapper rond datzelfde `mccleanup.exe` — die werkt wél (echte verwijdering, exitcode 0), maar toont ondanks `-s` alsnog een venster ("McAfee Software Removal") waar je zelf moet klikken, dus **niet geschikt voor onbemande installaties**. `mccleanup.exe` rechtstreeks, met de volledige buurmap (alle product-submappen) aanwezig, draait wél volledig headless.
+**McAfee's eigen per-product-uninstallers negeren silent-vlaggen zo goed als altijd** en openen een interactief venster. McAfee's eigen opruimmotor (`mccleanup.exe`, normaal verstopt in hun MCPR-verwijdertool) zou dat moeten omzeilen, maar recente MCPR-builds weigeren bewust om `mccleanup.exe` los aan te roepen (exitcode 2 — geprobeerd met zowel de actuele als een oudere `OldCert`-ondertekende versie uit hetzelfde pakket, beide falen op dezelfde manier). Hun grafische wrapper (`McClnUI.exe`) doet wél echt werk (exitcode 0, effectieve verwijdering), maar toont ondanks `-s` alsnog een venster ("McAfee Software Removal") waar je zelf moet klikken — dus niet geschikt voor onbemande installaties.
 
-**Eenmalig de opruimtool verkrijgen en op de share zetten:**
+**Huidige aanpak (best effort + fallback):** de "McAfee verwijderen"-instelling probeert eerst `mccleanup.exe` (indien aanwezig op de share — kan gedeeltelijk werken, verschilt per pc), en probeert daarna voor elk nog aanwezig McAfee-programma alsnog diens eigen geregistreerde uninstaller (dezelfde generieke aanpak als "NordVPN verwijderen", inclusief de `/I`-naar-`/X`- en Inno Setup-fixes). Dit lost niet gegarandeerd alles op — als er na een sessie nog McAfee-vermeldingen overblijven, geeft de foutmelding exact aan welke.
+
+**(Optioneel) de opruimtool verkrijgen en op de share zetten:**
 1. Download `MCPR.exe` (McAfee Consumer Product Removal tool) van `https://download.mcafee.com/molbin/iss-loc/SupportTools/MCPR/MCPR.exe`.
 2. Pak het uit met 7-Zip (`7z x MCPR.exe`) — dit hoeft niet uitgevoerd te worden, gewoon uitpakken volstaat en vermijdt de UAC-prompt/wizard volledig.
-3. Kopieer de **volledige map** `$1\` (niet enkel `mccleanup.exe`) naar `Config\McCleanup\` op de fileserver-share, zodat `Config\McCleanup\mccleanup.exe` bestaat.
+3. Kopieer de **volledige map** `$1\` naar `Config\McCleanup\` op de fileserver-share.
 
-Als `Config\McCleanup\mccleanup.exe` ontbreekt, faalt de "McAfee verwijderen"-instelling met een duidelijke foutmelding in plaats van stilzwijgend niets te doen.
+Als `Config\McCleanup\mccleanup.exe` ontbreekt, slaat de instelling die stap gewoon over en probeert meteen de generieke fallback per programma.
 
 ## Standaardselectie
 

@@ -113,55 +113,61 @@ public sealed class SettingsCatalogService(ShareLayout layout)
 
                 // McAfee's own per-product uninstallers (LiveSafe, WebAdvisor, Safe Connect, ...)
                 // essentially never honor silent flags — they open an interactive wizard
-                // regardless of what's passed. McAfee's own cleanup engine (normally bundled
-                // inside their MCPR removal tool) is the only reliable fully-silent path — but
-                // McClnUI.exe (the GUI wrapper MCPR's own StartCleanup.bat calls) still shows an
-                // interactive wizard window even with -s, which blocks unattended provisioning.
-                // mccleanup.exe (the underlying engine, one level below the GUI) is what actually
-                // does the work headlessly — it just needs its full sibling folder (per-product
-                // resources) present, not just the exe alone. It needs that whole folder staged
-                // at Config\McCleanup\ on the share; see README for the one-time extraction steps.
+                // regardless of what's passed. McAfee's own cleanup engine normally handles this
+                // (mccleanup.exe, bundled inside their MCPR removal tool) — but recent MCPR builds
+                // deliberately reject running mccleanup.exe standalone (exitcode 2, confirmed with
+                // both the current and an older/OldCert-signed build), and their McClnUI.exe GUI
+                // wrapper that *does* work still pops an interactive wizard even with -s. So this
+                // tries mccleanup.exe first as a best effort (works for some components on some
+                // machines), then falls back to each still-installed entry's own registered
+                // uninstaller (same generic path as "NordVPN verwijderen", already fixed to handle
+                // the /I-vs-/X MSI bug and Inno Setup's /VERYSILENT requirement) for whatever's
+                // left. Needs Config\McCleanup\ staged on the share; see README.
                 var mccleanupSourceDir = Path.Combine(layout.ConfigDir, "McCleanup");
                 var mccleanupSource = Path.Combine(mccleanupSourceDir, "mccleanup.exe");
-                if (!File.Exists(mccleanupSource))
+                if (File.Exists(mccleanupSource))
                 {
-                    throw new InvalidOperationException(
-                        $"{installed.Count} McAfee-programma('s) gevonden, maar \"mccleanup.exe\" ontbreekt in Config\\McCleanup\\ op de share " +
-                        "— zonder dat tool kan McAfee niet stil verwijderd worden (zie README).");
-                }
+                    var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
+                    CopyDirectory(mccleanupSourceDir, localDir);
+                    var localMccleanup = Path.Combine(localDir, "mccleanup.exe");
 
-                var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
-                CopyDirectory(mccleanupSourceDir, localDir);
-                var localMccleanup = Path.Combine(localDir, "mccleanup.exe");
+                    // Exact same component list McAfee's own StartCleanup.bat passes to McClnUI.exe.
+                    const string components = "StopServices,MFSY,PEF,MXD,CSP,Sustainability,MOCP,MFP,APPSTATS,Auth,EMproxy,FWdiver,HW,MAS,MAT,MBK,MCPR,McProxy,McSvcHost,VUL,MHN,MNA,MOBK,MPFP,MPFPCU,MPS,SHRED,MPSCU,MQC,MQCCU,MSAD,MSHR,MSK,MSKCU,MWL,NMC,RedirSvc,VS,REMEDIATION,MSC,YAP,TRUEKEY,LAM,PCB,Symlink,SafeConnect,MGS,WMIRemover,RESIDUE";
 
-                // Exact same component list McAfee's own StartCleanup.bat passes to McClnUI.exe.
-                const string components = "StopServices,MFSY,PEF,MXD,CSP,Sustainability,MOCP,MFP,APPSTATS,Auth,EMproxy,FWdiver,HW,MAS,MAT,MBK,MCPR,McProxy,McSvcHost,VUL,MHN,MNA,MOBK,MPFP,MPFPCU,MPS,SHRED,MPSCU,MQC,MQCCU,MSAD,MSHR,MSK,MSKCU,MWL,NMC,RedirSvc,VS,REMEDIATION,MSC,YAP,TRUEKEY,LAM,PCB,Symlink,SafeConnect,MGS,WMIRemover,RESIDUE";
-
-                try
-                {
-                    var psi = new ProcessStartInfo(localMccleanup, $"-p {components} -s")
+                    try
                     {
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        WorkingDirectory = localDir,
-                    };
-                    using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon mccleanup.exe niet starten.");
-                    await process.WaitForExitAsync(ct);
-
-                    // Exit code isn't a reliable success signal either — verify by re-checking
-                    // the registry, same as the generic uninstall path.
-                    var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (stillPresent.Count > 0)
+                        var psi = new ProcessStartInfo(localMccleanup, $"-p {components} -s")
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WorkingDirectory = localDir,
+                        };
+                        using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon mccleanup.exe niet starten.");
+                        await process.WaitForExitAsync(ct);
+                    }
+                    finally
                     {
-                        throw new InvalidOperationException(
-                            $"nog {stillPresent.Count} vermelding(en) aanwezig na mccleanup (exitcode {process.ExitCode}): "
-                            + string.Join(", ", stillPresent.Select(p => p.DisplayName)));
+                        TryDeleteDirectory(localDir);
                     }
                 }
-                finally
+
+                var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                var failures = new List<string>();
+                foreach (var program in stillPresent)
                 {
-                    TryDeleteDirectory(localDir);
+                    try
+                    {
+                        await UninstallProgramAsync(program, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{program.DisplayName}: {ex.Message}");
+                    }
                 }
+
+                if (failures.Count > 0)
+                    throw new InvalidOperationException(
+                        $"{failures.Count} van {stillPresent.Count} resterende programma('s) niet verwijderd: {string.Join("; ", failures)}");
             }
         },
         new SettingAction
