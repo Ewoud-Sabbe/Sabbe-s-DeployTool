@@ -4,5 +4,6 @@ public enum SessionItemKind
 {
     Installer,
     Shortcut,
-    Setting
+    Setting,
+    Bloatware
 }

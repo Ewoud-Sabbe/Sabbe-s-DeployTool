@@ -16,7 +16,8 @@ public partial class MainViewModel : ObservableObject
     private readonly InstallerMetadataStore _metadataStore;
     private readonly InstallerCatalogService _installerCatalog;
     private readonly ShortcutCatalogService _shortcutCatalog;
-    private readonly SettingsCatalogService _settingsCatalog;
+    private readonly SettingsCatalogService _settingsCatalog = new();
+    private readonly BloatwareCatalogService _bloatwareCatalog;
     private readonly ShortcutPlacementService _shortcutPlacer = new();
     private readonly ItemDefaultsStore _itemDefaultsStore;
 
@@ -26,6 +27,7 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<SessionItemViewModel> Installers { get; } = [];
     public ObservableCollection<SessionItemViewModel> Shortcuts { get; } = [];
     public ObservableCollection<SessionItemViewModel> Settings { get; } = [];
+    public ObservableCollection<SessionItemViewModel> Bloatware { get; } = [];
 
     /// <summary>Mirrors the session log file, line for line, as it's written.</summary>
     public ObservableCollection<string> LogLines { get; } = [];
@@ -49,11 +51,11 @@ public partial class MainViewModel : ObservableObject
         _metadataStore = new InstallerMetadataStore(_layout);
         _installerCatalog = new InstallerCatalogService(_layout, _metadataStore);
         _shortcutCatalog = new ShortcutCatalogService(_layout);
-        _settingsCatalog = new SettingsCatalogService(_layout);
+        _bloatwareCatalog = new BloatwareCatalogService(_layout);
         _itemDefaultsStore = new ItemDefaultsStore(_layout);
     }
 
-    private IEnumerable<SessionItemViewModel> AllItems => Installers.Concat(Shortcuts).Concat(Settings);
+    private IEnumerable<SessionItemViewModel> AllItems => Installers.Concat(Shortcuts).Concat(Settings).Concat(Bloatware);
 
     public async Task LoadAsync()
     {
@@ -68,6 +70,7 @@ public partial class MainViewModel : ObservableObject
             var installerEntries = await _installerCatalog.DiscoverAsync();
             var shortcutEntries = await _shortcutCatalog.DiscoverAsync();
             var settingActions = _settingsCatalog.GetAll();
+            var bloatwareActions = _bloatwareCatalog.GetAll();
             var itemDefaults = await _itemDefaultsStore.LoadAsync();
 
             Installers.Clear();
@@ -122,6 +125,23 @@ public partial class MainViewModel : ObservableObject
                 Settings.Add(new SessionItemViewModel(item, isDefault: isDefault));
             }
 
+            Bloatware.Clear();
+            foreach (var action in bloatwareActions)
+            {
+                var key = $"bloatware:{action.Name}";
+                var isDefault = itemDefaults.GetValueOrDefault(key, action.DefaultSelected);
+                var isSelected = previousSelections.TryGetValue(key, out var wasSelected) ? wasSelected : isDefault;
+
+                var item = new SessionItem
+                {
+                    Kind = SessionItemKind.Bloatware,
+                    Name = action.Name,
+                    IsSelected = isSelected,
+                    Setting = action
+                };
+                Bloatware.Add(new SessionItemViewModel(item, isDefault: isDefault));
+            }
+
             StatusMessage = "Klaar om te starten.";
         }
         catch (Exception ex)
@@ -139,6 +159,7 @@ public partial class MainViewModel : ObservableObject
         SessionItemKind.Installer => $"installer:{vm.Model.Installer!.FileName}",
         SessionItemKind.Shortcut => $"shortcut:{vm.Model.Shortcut!.FileName}",
         SessionItemKind.Setting => $"setting:{vm.Name}",
+        SessionItemKind.Bloatware => $"bloatware:{vm.Name}",
         _ => vm.Name
     };
 

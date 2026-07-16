@@ -28,12 +28,13 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         logger?.WriteLine($"Sessie gestart met {selected.Count} geselecteerde item(en) "
             + $"({selected.Count(i => i.Kind == SessionItemKind.Installer)} software, "
             + $"{selected.Count(i => i.Kind == SessionItemKind.Shortcut)} snelkoppeling(en), "
-            + $"{selected.Count(i => i.Kind == SessionItemKind.Setting)} instelling(en)).");
+            + $"{selected.Count(i => i.Kind == SessionItemKind.Setting)} instelling(en), "
+            + $"{selected.Count(i => i.Kind == SessionItemKind.Bloatware)} bloatware-item(en)).");
 
         foreach (var item in items.Where(i => i.Kind == SessionItemKind.Shortcut && i.IsSelected))
             await RunShortcutAsync(item, progress, ct);
 
-        foreach (var item in items.Where(i => i.Kind == SessionItemKind.Setting && i.IsSelected))
+        foreach (var item in items.Where(i => i.Kind is SessionItemKind.Setting or SessionItemKind.Bloatware && i.IsSelected))
             await RunSettingAsync(item, progress, ct);
 
         var installerItems = items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected).ToList();
@@ -50,7 +51,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         {
             SessionItemKind.Installer => RunInstallerWithRetryAsync(item, progress, ct),
             SessionItemKind.Shortcut => RunShortcutAsync(item, progress, ct),
-            SessionItemKind.Setting => RunSettingAsync(item, progress, ct),
+            SessionItemKind.Setting or SessionItemKind.Bloatware => RunSettingAsync(item, progress, ct),
             _ => Task.CompletedTask
         };
     }

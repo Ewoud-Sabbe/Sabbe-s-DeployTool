@@ -5,7 +5,7 @@ Windows-app (WPF/.NET) om nieuwe of te herinstalleren pc's in één keer voor te
 ## Hoe het werkt
 
 1. De app verbindt bij opstarten met de fileserver-share en scant `Installers\` en `Shortcuts\`.
-2. Je krijgt één scherm met drie secties: **Software**, **Snelkoppelingen**, **Instellingen** — elk aanvinkbaar, met standaardselectie.
+2. Je krijgt één scherm met vier secties: **Software**, **Snelkoppelingen**, **Instellingen**, **Bloatware** — elk aanvinkbaar, met standaardselectie.
 3. Klik **Start installatie**: geselecteerde items worden sequentieel verwerkt, met live status en een gedetailleerd logpaneel.
 4. Mislukte items krijgen automatisch één nieuwe poging; daarna kan je ze individueel opnieuw proberen via de knop op die rij.
 5. Alles wordt weggeschreven naar een logbestand op de share (`Logs\{computernaam}_{tijdstip}.log`), incrementeel — ook bij een crash blijft er een spoor.
@@ -47,11 +47,13 @@ Zet een `.url`-, `.lnk`- of `.exe`-bestand rechtstreeks in `Shortcuts\` op de sh
 
 ## Instellingen toevoegen
 
-Instellingen zijn hardcoded C#-acties in [`DeployTool.Core/Services/SettingsCatalogService.cs`](DeployTool.Core/Services/SettingsCatalogService.cs) — geen JSON-bestand. Voeg een nieuwe `SettingAction` toe aan de lijst (naam + een `Execute`-actie) om een instelling toe te voegen; vereist een codewijziging en herpublicatie.
+Instellingen zijn hardcoded C#-acties in [`DeployTool.Core/Services/SettingsCatalogService.cs`](DeployTool.Core/Services/SettingsCatalogService.cs) — geen JSON-bestand. Voeg een nieuwe `SettingAction` toe aan de lijst (naam + een `Execute`-actie) om een instelling toe te voegen; vereist een codewijziging en herpublicatie. Bloatware-verwijdering (zie verderop) staat in een apart bestand en eigen sectie in de app, niet hier.
 
 ## Bloatware verwijderen (McAfee, NordVPN)
 
-Twee losse instellingen — **"McAfee verwijderen"** en **"NordVPN verwijderen"** — zoeken bij het opstarten van een sessie in het register naar elke geïnstalleerde toepassing waarvan de naam "mcafee" resp. "nordvpn" bevat en verwijderen ze stil. McAfee registreert op OEM-pc's vaak meerdere losse programma's tegelijk (LiveSafe, WebAdvisor, Safe Connect, ...) — die worden allemaal meegenomen, niet enkel de eerste.
+Losse **"Bloatware"**-sectie in de app, gescheiden van de gewone Instellingen. De acties zelf staan in [`DeployTool.Core/Services/BloatwareCatalogService.cs`](DeployTool.Core/Services/BloatwareCatalogService.cs) — zelfde `SettingAction`-vorm en manier van toevoegen als bij Instellingen, enkel in een eigen lijst/sectie zodat bloatware-verwijdering visueel en functioneel apart staat van normale systeeminstellingen.
+
+Twee acties — **"McAfee verwijderen"** en **"NordVPN verwijderen"** — zoeken bij het opstarten van een sessie in het register naar elke geïnstalleerde toepassing waarvan de naam "mcafee" resp. "nordvpn" bevat en verwijderen ze stil. McAfee registreert op OEM-pc's vaak meerdere losse programma's tegelijk (LiveSafe, WebAdvisor, Safe Connect, ...) — die worden allemaal meegenomen, niet enkel de eerste.
 
 NordVPN gebruikt zijn eigen geregistreerde uninstaller. Die is Inno Setup-gebaseerd (`unins###.exe`) en heeft `/VERYSILENT` nodig — zonder die vlag toont hij een bevestigingsvenster dat zonder zichtbaar venster gewoon niets doet (lijkt op succes: snelle exitcode 0, maar het programma blijft staan). De app herkent dat patroon automatisch en voegt de juiste vlaggen toe.
 

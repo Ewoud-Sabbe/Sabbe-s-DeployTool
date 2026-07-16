@@ -1,0 +1,267 @@
+using System.Diagnostics;
+using System.Text.RegularExpressions;
+using DeployTool.Core.Models;
+using DeployTool.Core.Polyfills;
+using Microsoft.Win32;
+
+namespace DeployTool.Core.Services;
+
+/// <summary>Hardcoded list of bloatware-removal actions (McAfee, NordVPN, ...). Add new entries here.</summary>
+public sealed class BloatwareCatalogService(ShareLayout layout)
+{
+    public List<SettingAction> GetAll() =>
+    [
+        new SettingAction
+        {
+            Name = "McAfee verwijderen",
+            DefaultSelected = true,
+            Execute = async ct =>
+            {
+                var installed = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (installed.Count == 0) return;
+
+                // McAfee's own per-product uninstallers (LiveSafe, WebAdvisor, Safe Connect, ...)
+                // essentially never honor silent flags — they open an interactive wizard
+                // regardless of what's passed. McAfee's own cleanup engine normally handles this
+                // (mccleanup.exe, bundled inside their MCPR removal tool) — but recent MCPR builds
+                // deliberately reject running mccleanup.exe standalone (exitcode 2, confirmed with
+                // both the current and an older/OldCert-signed build), and their McClnUI.exe GUI
+                // wrapper that *does* work still pops an interactive wizard even with -s. This
+                // runs mccleanup.exe first as a best effort — it still silently removes some
+                // components as a side effect even while exiting with code 2 — and falls back to
+                // each remaining entry's own uninstaller below. Needs Config\McCleanup\ staged on
+                // the share; see README.
+                var mccleanupSourceDir = Path.Combine(layout.ConfigDir, "McCleanup");
+                var mccleanupSource = Path.Combine(mccleanupSourceDir, "mccleanup.exe");
+                if (File.Exists(mccleanupSource))
+                {
+                    var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
+                    CopyDirectory(mccleanupSourceDir, localDir);
+                    var localMccleanup = Path.Combine(localDir, "mccleanup.exe");
+
+                    // Exact same component list McAfee's own StartCleanup.bat passes to McClnUI.exe.
+                    const string components = "StopServices,MFSY,PEF,MXD,CSP,Sustainability,MOCP,MFP,APPSTATS,Auth,EMproxy,FWdiver,HW,MAS,MAT,MBK,MCPR,McProxy,McSvcHost,VUL,MHN,MNA,MOBK,MPFP,MPFPCU,MPS,SHRED,MPSCU,MQC,MQCCU,MSAD,MSHR,MSK,MSKCU,MWL,NMC,RedirSvc,VS,REMEDIATION,MSC,YAP,TRUEKEY,LAM,PCB,Symlink,SafeConnect,MGS,WMIRemover,RESIDUE";
+
+                    try
+                    {
+                        var psi = new ProcessStartInfo(localMccleanup, $"-p {components} -s")
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WorkingDirectory = localDir,
+                        };
+                        using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon mccleanup.exe niet starten.");
+                        await process.WaitForExitAsync(ct);
+                    }
+                    finally
+                    {
+                        TryDeleteDirectory(localDir);
+                    }
+                }
+
+                // For whatever mccleanup.exe didn't get, fall back to each entry's own registered
+                // uninstaller (same generic path "NordVPN verwijderen" uses). For McAfee this
+                // usually means an interactive window — by design here, since someone is expected
+                // to be watching and can just click through it rather than having to go hunt McAfee
+                // down manually afterwards. UninstallProgramAsync's timeout keeps a genuinely stuck
+                // uninstaller from blocking the rest of the session indefinitely either way.
+                var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                var failures = new List<string>();
+                foreach (var program in stillPresent)
+                {
+                    try
+                    {
+                        await UninstallProgramAsync(program, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{program.DisplayName}: {ex.Message}");
+                    }
+                }
+
+                if (failures.Count > 0)
+                    throw new InvalidOperationException(
+                        $"{failures.Count} van {stillPresent.Count} resterende programma('s) niet verwijderd: {string.Join("; ", failures)}");
+            }
+        },
+        new SettingAction
+        {
+            Name = "NordVPN verwijderen",
+            DefaultSelected = true,
+            Execute = async ct =>
+            {
+                var matches = FindInstalledPrograms(name => name.IndexOf("nordvpn", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                var failures = new List<string>();
+                foreach (var program in matches)
+                {
+                    try
+                    {
+                        await UninstallProgramAsync(program, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{program.DisplayName}: {ex.Message}");
+                    }
+                }
+
+                if (failures.Count > 0)
+                    throw new InvalidOperationException(
+                        $"{failures.Count} van {matches.Count} programma('s) niet volledig verwijderd: {string.Join("; ", failures)}");
+            }
+        },
+    ];
+
+    private sealed record InstalledProgram(string DisplayName, string? UninstallString, string? QuietUninstallString);
+
+    /// <summary>Scans the Uninstall registry (both bitness views + HKCU) for entries whose DisplayName matches.
+    /// A single vendor — McAfee especially — can register several separate entries.</summary>
+    private static List<InstalledProgram> FindInstalledPrograms(Func<string, bool> nameMatches)
+    {
+        var results = new List<InstalledProgram>();
+
+        (RegistryHive Hive, RegistryView View)[] locations =
+        [
+            (RegistryHive.LocalMachine, RegistryView.Registry64),
+            (RegistryHive.LocalMachine, RegistryView.Registry32),
+            (RegistryHive.CurrentUser, RegistryView.Registry64),
+        ];
+
+        foreach (var (hive, view) in locations)
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+            using var uninstallKey = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
+            if (uninstallKey is null) continue;
+
+            foreach (var subKeyName in uninstallKey.GetSubKeyNames())
+            {
+                using var subKey = uninstallKey.OpenSubKey(subKeyName);
+                if (subKey?.GetValue("DisplayName") is not string displayName || string.IsNullOrWhiteSpace(displayName))
+                    continue;
+
+                if (!nameMatches(displayName)) continue;
+
+                results.Add(new InstalledProgram(
+                    displayName,
+                    subKey.GetValue("UninstallString") as string,
+                    subKey.GetValue("QuietUninstallString") as string));
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Runs the program's own registered uninstaller silently. Vendor uninstallers report success
+    /// with wildly inconsistent exit codes, so instead of trusting the exit code, this re-checks
+    /// the registry afterwards — if the entry is gone, it worked, regardless of what it returned.
+    /// </summary>
+    private static async Task UninstallProgramAsync(InstalledProgram program, CancellationToken ct)
+    {
+        var command = program.QuietUninstallString ?? program.UninstallString;
+        if (string.IsNullOrWhiteSpace(command))
+            throw new InvalidOperationException("geen uninstall-commando gevonden in het register.");
+
+        var (fileName, arguments) = ParseUninstallCommand(command!);
+
+        if (fileName.EndsWith("msiexec.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            // Some vendors (NordVPN's Advanced Installer package among them) register an
+            // UninstallString using /I{guid} (install/repair) instead of /X{guid} (uninstall) —
+            // running it as-is just silently repairs/reinstalls the product, which is why it
+            // reports success (exit 0) while the program is still there afterwards. /X is the
+            // standard uninstall verb every MSI package must support, regardless of what the
+            // (buggy) registry string says.
+            arguments = Regex.Replace(arguments, @"/I\{", "/X{", RegexOptions.IgnoreCase);
+
+            // MSI-based uninstalls have a reliable silent switch — force it even if the registry
+            // string itself wasn't already silent (most QuietUninstallString values are, but
+            // plain UninstallString rarely is).
+            if (arguments.IndexOf("/qn", StringComparison.OrdinalIgnoreCase) < 0 &&
+                arguments.IndexOf("/quiet", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                arguments += " /qn /norestart";
+            }
+        }
+
+        // Inno Setup uninstallers (NordVPN among many others) are named unins###.exe by
+        // convention and use /VERYSILENT, not /qn — without it they just show a confirmation
+        // dialog, which with no window renders as "ran instantly, exit 0, did nothing".
+        if (Regex.IsMatch(Path.GetFileName(fileName), @"^unins\d*\.exe$", RegexOptions.IgnoreCase) &&
+            arguments.IndexOf("silent", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            arguments += " /VERYSILENT /SUPPRESSMSGBOXES /NORESTART";
+        }
+
+        var psi = new ProcessStartInfo(fileName, arguments) { UseShellExecute = false, CreateNoWindow = true };
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon de uninstaller niet starten.");
+
+        // Some vendor uninstallers (McAfee's included) show an interactive window regardless of
+        // any silent flag, and on at least one real machine the process never exited even after
+        // the window was closed by hand — this bounds the wait so a single stuck uninstaller
+        // can't block the rest of an unattended session forever. Five minutes is generous enough
+        // for someone to actually click through a wizard if they're sitting there watching.
+        await WaitForExitWithTimeoutAsync(process, TimeSpan.FromMinutes(5), ct);
+
+        var stillPresent = FindInstalledPrograms(n => string.Equals(n, program.DisplayName, StringComparison.OrdinalIgnoreCase)).Count > 0;
+        if (stillPresent)
+            throw new InvalidOperationException($"nog steeds aanwezig na uninstall-poging (exitcode {process.ExitCode}, commando: \"{fileName}\" {arguments}).");
+    }
+
+    /// <summary>Splits a registry uninstall command into its executable and argument string — handles
+    /// both a quoted path ("C:\...\uninstall.exe" -args) and an unquoted one (MsiExec.exe /X{guid}).</summary>
+    private static (string FileName, string Arguments) ParseUninstallCommand(string command)
+    {
+        command = command.Trim();
+        if (command.Length > 0 && command[0] == '"')
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            if (closingQuote > 0)
+                return (command[1..closingQuote], command[(closingQuote + 1)..].Trim());
+        }
+
+        var spaceIndex = command.IndexOf(' ');
+        return spaceIndex < 0 ? (command, string.Empty) : (command[..spaceIndex], command[(spaceIndex + 1)..].Trim());
+    }
+
+    private static void CopyDirectory(string sourceDir, string destinationDir)
+    {
+        Directory.CreateDirectory(destinationDir);
+        var sourceRoot = sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = file.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var destFile = Path.Combine(destinationDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
+            File.Copy(file, destFile, overwrite: true);
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // best-effort cleanup — a locked file here shouldn't fail the session
+        }
+    }
+
+    /// <summary>Waits for a process to exit, but gives up after <paramref name="timeout"/> instead
+    /// of potentially waiting forever on a stuck/hung external process.</summary>
+    private static async Task WaitForExitWithTimeoutAsync(Process process, TimeSpan timeout, CancellationToken ct)
+    {
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        try
+        {
+            await process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"proces reageerde niet binnen {timeout.TotalSeconds:N0}s.");
+        }
+    }
+}

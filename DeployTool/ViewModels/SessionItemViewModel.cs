@@ -13,7 +13,7 @@ public partial class SessionItemViewModel : ObservableObject
     public SessionItemKind Kind => Model.Kind;
     public string Name => Model.Name;
     public bool IsInstaller => Kind == SessionItemKind.Installer;
-    public bool CanToggleDefault => Kind is SessionItemKind.Shortcut or SessionItemKind.Setting;
+    public bool CanToggleDefault => Kind is SessionItemKind.Shortcut or SessionItemKind.Setting or SessionItemKind.Bloatware;
     public string ConfigureButtonLabel => IsConfigured ? "Bewerken..." : "Configureren...";
 
     /// <summary>Stable key into ItemDefaultsStore, e.g. "shortcut:foo.url" / "setting:Bestandsextensies tonen".</summary>
@@ -21,6 +21,7 @@ public partial class SessionItemViewModel : ObservableObject
     {
         SessionItemKind.Shortcut => $"shortcut:{Model.Shortcut!.FileName}",
         SessionItemKind.Setting => $"setting:{Name}",
+        SessionItemKind.Bloatware => $"bloatware:{Name}",
         _ => $"installer:{Model.Installer?.FileName}"
     };
 
