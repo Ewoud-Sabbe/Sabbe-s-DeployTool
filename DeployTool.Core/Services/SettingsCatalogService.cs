@@ -117,12 +117,11 @@ public sealed class SettingsCatalogService(ShareLayout layout)
                 // (mccleanup.exe, bundled inside their MCPR removal tool) — but recent MCPR builds
                 // deliberately reject running mccleanup.exe standalone (exitcode 2, confirmed with
                 // both the current and an older/OldCert-signed build), and their McClnUI.exe GUI
-                // wrapper that *does* work still pops an interactive wizard even with -s. So this
-                // tries mccleanup.exe first as a best effort (works for some components on some
-                // machines), then falls back to each still-installed entry's own registered
-                // uninstaller (same generic path as "NordVPN verwijderen", already fixed to handle
-                // the /I-vs-/X MSI bug and Inno Setup's /VERYSILENT requirement) for whatever's
-                // left. Needs Config\McCleanup\ staged on the share; see README.
+                // wrapper that *does* work still pops an interactive wizard even with -s. This
+                // runs mccleanup.exe as a best effort — it still silently removes some components
+                // as a side effect even while exiting with code 2 — and reports whatever's left
+                // afterward (see below) rather than trying anything that could show a window.
+                // Needs Config\McCleanup\ staged on the share; see README.
                 var mccleanupSourceDir = Path.Combine(layout.ConfigDir, "McCleanup");
                 var mccleanupSource = Path.Combine(mccleanupSourceDir, "mccleanup.exe");
                 if (File.Exists(mccleanupSource))
