@@ -112,35 +112,38 @@ public sealed class SettingsCatalogService(ShareLayout layout)
                 // McAfee's own per-product uninstallers (LiveSafe, WebAdvisor, Safe Connect, ...)
                 // essentially never honor silent flags — they open an interactive wizard
                 // regardless of what's passed. McAfee's own cleanup engine (normally bundled
-                // inside their MCPR removal tool, invoked here the same way MCPR's own
-                // StartCleanup.bat does it) is the only reliable fully-silent path. It needs its
-                // whole folder — not just the exe — staged at Config\McCleanup\ on the share; see
-                // README for the one-time extraction steps.
+                // inside their MCPR removal tool) is the only reliable fully-silent path — but
+                // McClnUI.exe (the GUI wrapper MCPR's own StartCleanup.bat calls) still shows an
+                // interactive wizard window even with -s, which blocks unattended provisioning.
+                // mccleanup.exe (the underlying engine, one level below the GUI) is what actually
+                // does the work headlessly — it just needs its full sibling folder (per-product
+                // resources) present, not just the exe alone. It needs that whole folder staged
+                // at Config\McCleanup\ on the share; see README for the one-time extraction steps.
                 var mccleanupSourceDir = Path.Combine(layout.ConfigDir, "McCleanup");
-                var mcClnUiSource = Path.Combine(mccleanupSourceDir, "McClnUI.exe");
-                if (!File.Exists(mcClnUiSource))
+                var mccleanupSource = Path.Combine(mccleanupSourceDir, "mccleanup.exe");
+                if (!File.Exists(mccleanupSource))
                 {
                     throw new InvalidOperationException(
-                        $"{installed.Count} McAfee-programma('s) gevonden, maar \"McClnUI.exe\" ontbreekt in Config\\McCleanup\\ op de share " +
+                        $"{installed.Count} McAfee-programma('s) gevonden, maar \"mccleanup.exe\" ontbreekt in Config\\McCleanup\\ op de share " +
                         "— zonder dat tool kan McAfee niet stil verwijderd worden (zie README).");
                 }
 
                 var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
                 CopyDirectory(mccleanupSourceDir, localDir);
-                var localMcClnUi = Path.Combine(localDir, "McClnUI.exe");
+                var localMccleanup = Path.Combine(localDir, "mccleanup.exe");
 
-                // Exact same component list and flags as McAfee's own StartCleanup.bat.
+                // Exact same component list McAfee's own StartCleanup.bat passes to McClnUI.exe.
                 const string components = "StopServices,MFSY,PEF,MXD,CSP,Sustainability,MOCP,MFP,APPSTATS,Auth,EMproxy,FWdiver,HW,MAS,MAT,MBK,MCPR,McProxy,McSvcHost,VUL,MHN,MNA,MOBK,MPFP,MPFPCU,MPS,SHRED,MPSCU,MQC,MQCCU,MSAD,MSHR,MSK,MSKCU,MWL,NMC,RedirSvc,VS,REMEDIATION,MSC,YAP,TRUEKEY,LAM,PCB,Symlink,SafeConnect,MGS,WMIRemover,RESIDUE";
 
                 try
                 {
-                    var psi = new ProcessStartInfo(localMcClnUi, $"-p {components} -s")
+                    var psi = new ProcessStartInfo(localMccleanup, $"-p {components} -s")
                     {
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         WorkingDirectory = localDir,
                     };
-                    using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon McClnUI.exe niet starten.");
+                    using var process = Process.Start(psi) ?? throw new InvalidOperationException("kon mccleanup.exe niet starten.");
                     await process.WaitForExitAsync(ct);
 
                     // Exit code isn't a reliable success signal either — verify by re-checking
@@ -149,7 +152,7 @@ public sealed class SettingsCatalogService(ShareLayout layout)
                     if (stillPresent.Count > 0)
                     {
                         throw new InvalidOperationException(
-                            $"nog {stillPresent.Count} vermelding(en) aanwezig na McClnUI (exitcode {process.ExitCode}): "
+                            $"nog {stillPresent.Count} vermelding(en) aanwezig na mccleanup (exitcode {process.ExitCode}): "
                             + string.Join(", ", stillPresent.Select(p => p.DisplayName)));
                     }
                 }
