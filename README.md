@@ -102,7 +102,7 @@ De app vereist adminrechten (zie `app.manifest`, `requireAdministrator`) — bij
 dotnet publish DeployTool\DeployTool.csproj -p:PublishProfile=FolderProfile -o "\\jdstore\Installatie\# VOORINSTALLATIE\deploy map\App"
 ```
 
-Self-contained + ReadyToRun (win-x64) — een pc heeft dus geen .NET-runtime nodig, en de app start snel op ook al draait ze rechtstreeks vanaf het netwerk. Zie `DeployTool/Properties/PublishProfiles/FolderProfile.pubxml`.
+De app target .NET Framework 4.8, dat standaard met Windows 10/11 meegeleverd wordt — er hoeft dus geen runtime gebundeld te worden. De gepubliceerde output is enkel een handvol kleine assemblies (een paar MB aan losse bestanden), wat het opstarten rechtstreeks vanaf het netwerk snel houdt. Zie `DeployTool/Properties/PublishProfiles/FolderProfile.pubxml`.
 
 ## Logging
 
