@@ -32,6 +32,13 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             + $"{selected.Count(i => i.Kind == SessionItemKind.Setting)} instelling(en), "
             + $"{selected.Count(i => i.Kind == SessionItemKind.Bloatware)} bloatware-item(en)).");
 
+        var installerItems = items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected).ToList();
+
+        // Start the first installer's network copy right away: the settings/bloatware phase can
+        // run for minutes (McAfee's interactive fallback alone is bounded at 5) while the network
+        // link would otherwise sit completely idle the whole time.
+        var firstPrepare = installerItems.Count > 0 ? PrepareAsync(installerItems[0], ct) : null;
+
         try
         {
             foreach (var item in items.Where(i => i.Kind == SessionItemKind.Shortcut && i.IsSelected))
@@ -46,13 +53,20 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
                 await RunSettingAsync(item, progress, ct);
             }
 
-            var installerItems = items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected).ToList();
-            await RunInstallersPipelinedAsync(installerItems, progress, ct);
+            await RunInstallersPipelinedAsync(installerItems, firstPrepare, progress, ct);
 
             logger?.WriteLine("Sessie voltooid.");
         }
         catch (OperationCanceledException)
         {
+            // If cancellation hit before the installer phase consumed the prefetch, drain it here
+            // so its temp folder doesn't leak. (When it was consumed, this is a no-op.)
+            if (firstPrepare is not null)
+            {
+                try { TryDeleteDirectory((await firstPrepare).TempDir); }
+                catch (OperationCanceledException) { /* its temp dir was already cleaned up */ }
+            }
+
             // Whatever was mid-flight gets marked; untouched items simply stay Pending.
             foreach (var item in selected.Where(i => i.Status == ItemStatus.Running))
                 Report(item, ItemStatus.Failed, progress, "Geannuleerd");
@@ -89,11 +103,11 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     /// copy finishes — so that copy happens in the background while N is actually installing
     /// (a purely local, network-idle phase that can easily run for minutes on a large installer).
     /// </summary>
-    private async Task RunInstallersPipelinedAsync(IReadOnlyList<SessionItem> installerItems, IProgress<SessionItemProgress>? progress, CancellationToken ct)
+    private async Task RunInstallersPipelinedAsync(IReadOnlyList<SessionItem> installerItems, Task<PrepareOutcome>? initialPrepare, IProgress<SessionItemProgress>? progress, CancellationToken ct)
     {
         if (installerItems.Count == 0) return;
 
-        Task<PrepareOutcome>? nextPrepare = PrepareAsync(installerItems[0], ct);
+        var nextPrepare = initialPrepare ?? PrepareAsync(installerItems[0], ct);
 
         try
         {
