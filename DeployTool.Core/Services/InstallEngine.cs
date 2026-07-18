@@ -16,8 +16,9 @@ namespace DeployTool.Core.Services;
 /// </summary>
 public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, SessionLogger? logger = null)
 {
-    // MSI success codes: 0 = OK, 3010 = success but reboot required.
-    private static readonly HashSet<int> SuccessExitCodes = [0, 3010];
+    // MSI success codes: 0 = OK, 3010 = success but reboot required,
+    // 1641 = success and a reboot was initiated (some .exe installers return this too).
+    private static readonly HashSet<int> SuccessExitCodes = [0, 3010, 1641];
 
     // INSTALLSTATE values (msi.h) that mean the product is present on the machine.
     private static readonly HashSet<int> InstalledProductStates = [3, 4, 5]; // LOCAL, SOURCE, DEFAULT
