@@ -103,8 +103,10 @@ De app vereist adminrechten (zie `app.manifest`, `requireAdministrator`) — bij
 ## Publiceren (deploy naar de fileserver)
 
 ```powershell
-dotnet publish DeployTool\DeployTool.csproj -p:PublishProfile=FolderProfile -o "\\jdstore\Installatie\# VOORINSTALLATIE\deploy map\App"
+dotnet publish DeployTool\DeployTool.csproj -c Release -p:PublishProfile=FolderProfile -o "\\jdstore\Installatie\# VOORINSTALLATIE\deploy map\App"
 ```
+
+De `-c Release` is verplicht: de `<Configuration>` in het publish-profiel wordt door MSBuild niet betrouwbaar doorgegeven aan projectreferenties, waardoor je zonder die vlag een verse `DeployTool.exe` naast een verouderde Debug-`DeployTool.Core.dll` op de share kan krijgen.
 
 De app target .NET Framework 4.8, dat standaard met Windows 10/11 meegeleverd wordt — er hoeft dus geen runtime gebundeld te worden. De gepubliceerde output is enkel een handvol kleine assemblies (een paar MB aan losse bestanden), wat het opstarten rechtstreeks vanaf het netwerk snel houdt. Zie `DeployTool/Properties/PublishProfiles/FolderProfile.pubxml`.
 
