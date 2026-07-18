@@ -36,10 +36,12 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
     private bool isLoading = true;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
     private bool isRunning;
 
     [ObservableProperty]
@@ -201,17 +203,29 @@ public partial class MainViewModel : ObservableObject
 
     private bool CanStart() => !IsLoading && !IsRunning;
 
-    [RelayCommand]
+    // Guarded on IsRunning: a failed item shows its retry button while later items are still
+    // being processed, and a second concurrent install would make msiexec fail with 1618.
+    [RelayCommand(CanExecute = nameof(CanRetry))]
     private async Task RetryAsync(SessionItemViewModel? item)
     {
         if (item is null) return;
 
-        var logger = EnsureLogger();
-        _engine ??= new InstallEngine(_shortcutPlacer, logger);
+        IsRunning = true;
+        try
+        {
+            var logger = EnsureLogger();
+            _engine ??= new InstallEngine(_shortcutPlacer, logger);
 
-        var progress = new Progress<SessionItemProgress>(OnProgress);
-        await _engine.RetryAsync(item.Model, progress);
+            var progress = new Progress<SessionItemProgress>(OnProgress);
+            await _engine.RetryAsync(item.Model, progress);
+        }
+        finally
+        {
+            IsRunning = false;
+        }
     }
+
+    private bool CanRetry(SessionItemViewModel? item) => !IsLoading && !IsRunning;
 
     [RelayCommand]
     private async Task ConfigureAsync(SessionItemViewModel? item)
