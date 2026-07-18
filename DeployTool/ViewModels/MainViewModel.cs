@@ -42,7 +42,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartCommand))]
     [NotifyCanExecuteChangedFor(nameof(RetryCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CancelSessionCommand))]
     private bool isRunning;
+
+    private CancellationTokenSource? _sessionCts;
 
     [ObservableProperty]
     private string statusMessage = "Verbinden met fileserver...";
@@ -180,6 +183,7 @@ public partial class MainViewModel : ObservableObject
     {
         IsRunning = true;
         StatusMessage = "Bezig...";
+        _sessionCts = new CancellationTokenSource();
         try
         {
             var logger = EnsureLogger();
@@ -188,8 +192,12 @@ public partial class MainViewModel : ObservableObject
             var selected = AllItems.Where(i => i.IsSelected && i.IsConfigured).Select(vm => vm.Model).ToList();
             var progress = new Progress<SessionItemProgress>(OnProgress);
 
-            await _engine.RunAsync(selected, progress);
+            await _engine.RunAsync(selected, progress, _sessionCts.Token);
             StatusMessage = "Sessie voltooid.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Sessie geannuleerd.";
         }
         catch (Exception ex)
         {
@@ -198,10 +206,19 @@ public partial class MainViewModel : ObservableObject
         finally
         {
             IsRunning = false;
+            _sessionCts.Dispose();
+            _sessionCts = null;
         }
     }
 
     private bool CanStart() => !IsLoading && !IsRunning;
+
+    [RelayCommand(CanExecute = nameof(IsRunning))]
+    private void CancelSession()
+    {
+        StatusMessage = "Bezig met annuleren...";
+        _sessionCts?.Cancel();
+    }
 
     // Guarded on IsRunning: a failed item shows its retry button while later items are still
     // being processed, and a second concurrent install would make msiexec fail with 1618.
@@ -211,17 +228,24 @@ public partial class MainViewModel : ObservableObject
         if (item is null) return;
 
         IsRunning = true;
+        _sessionCts = new CancellationTokenSource();
         try
         {
             var logger = EnsureLogger();
             _engine ??= new InstallEngine(_shortcutPlacer, logger);
 
             var progress = new Progress<SessionItemProgress>(OnProgress);
-            await _engine.RetryAsync(item.Model, progress);
+            await _engine.RetryAsync(item.Model, progress, _sessionCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Nieuwe poging geannuleerd.";
         }
         finally
         {
             IsRunning = false;
+            _sessionCts.Dispose();
+            _sessionCts = null;
         }
     }
 

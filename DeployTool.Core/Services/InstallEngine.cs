@@ -31,29 +31,56 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             + $"{selected.Count(i => i.Kind == SessionItemKind.Setting)} instelling(en), "
             + $"{selected.Count(i => i.Kind == SessionItemKind.Bloatware)} bloatware-item(en)).");
 
-        foreach (var item in items.Where(i => i.Kind == SessionItemKind.Shortcut && i.IsSelected))
-            await RunShortcutAsync(item, progress, ct);
+        try
+        {
+            foreach (var item in items.Where(i => i.Kind == SessionItemKind.Shortcut && i.IsSelected))
+            {
+                ct.ThrowIfCancellationRequested();
+                await RunShortcutAsync(item, progress, ct);
+            }
 
-        foreach (var item in items.Where(i => i.Kind is SessionItemKind.Setting or SessionItemKind.Bloatware && i.IsSelected))
-            await RunSettingAsync(item, progress, ct);
+            foreach (var item in items.Where(i => i.Kind is SessionItemKind.Setting or SessionItemKind.Bloatware && i.IsSelected))
+            {
+                ct.ThrowIfCancellationRequested();
+                await RunSettingAsync(item, progress, ct);
+            }
 
-        var installerItems = items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected).ToList();
-        await RunInstallersPipelinedAsync(installerItems, progress, ct);
+            var installerItems = items.Where(i => i.Kind == SessionItemKind.Installer && i.IsSelected).ToList();
+            await RunInstallersPipelinedAsync(installerItems, progress, ct);
 
-        logger?.WriteLine("Sessie voltooid.");
+            logger?.WriteLine("Sessie voltooid.");
+        }
+        catch (OperationCanceledException)
+        {
+            // Whatever was mid-flight gets marked; untouched items simply stay Pending.
+            foreach (var item in selected.Where(i => i.Status == ItemStatus.Running))
+                Report(item, ItemStatus.Failed, progress, "Geannuleerd");
+            logger?.WriteLine("Sessie geannuleerd — een al gestart(e) installer/uninstaller draait mogelijk nog door.");
+            throw;
+        }
     }
 
     /// <summary>Re-runs a single failed item, e.g. from the "opnieuw proberen" button.</summary>
-    public Task RetryAsync(SessionItem item, IProgress<SessionItemProgress>? progress, CancellationToken ct = default)
+    public async Task RetryAsync(SessionItem item, IProgress<SessionItemProgress>? progress, CancellationToken ct = default)
     {
         logger?.WriteLine($"[{item.Name}] Handmatige nieuwe poging gestart.");
-        return item.Kind switch
+        try
         {
-            SessionItemKind.Installer => RunInstallerWithRetryAsync(item, progress, ct),
-            SessionItemKind.Shortcut => RunShortcutAsync(item, progress, ct),
-            SessionItemKind.Setting or SessionItemKind.Bloatware => RunSettingAsync(item, progress, ct),
-            _ => Task.CompletedTask
-        };
+            await (item.Kind switch
+            {
+                SessionItemKind.Installer => RunInstallerWithRetryAsync(item, progress, ct),
+                SessionItemKind.Shortcut => RunShortcutAsync(item, progress, ct),
+                SessionItemKind.Setting or SessionItemKind.Bloatware => RunSettingAsync(item, progress, ct),
+                _ => Task.CompletedTask
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            if (item.Status == ItemStatus.Running)
+                Report(item, ItemStatus.Failed, progress, "Geannuleerd");
+            logger?.WriteLine($"[{item.Name}] Nieuwe poging geannuleerd.");
+            throw;
+        }
     }
 
     /// <summary>
@@ -67,19 +94,32 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 
         Task<PrepareOutcome>? nextPrepare = PrepareAsync(installerItems[0], ct);
 
-        for (var i = 0; i < installerItems.Count; i++)
+        try
         {
-            var item = installerItems[i];
-            Report(item, ItemStatus.Running, progress);
+            for (var i = 0; i < installerItems.Count; i++)
+            {
+                var item = installerItems[i];
+                Report(item, ItemStatus.Running, progress);
 
-            var prepared = await nextPrepare!;
+                var prepared = await nextPrepare!;
 
-            // This item's copy just finished — kick off the next one now, so it overlaps with
-            // this item's install instead of only starting once the install is done.
-            nextPrepare = i + 1 < installerItems.Count ? PrepareAsync(installerItems[i + 1], ct) : null;
+                // This item's copy just finished — kick off the next one now, so it overlaps with
+                // this item's install instead of only starting once the install is done.
+                nextPrepare = i + 1 < installerItems.Count ? PrepareAsync(installerItems[i + 1], ct) : null;
 
-            var (status, detail) = await InstallWithRetryAsync(item, prepared, ct);
-            Report(item, status, progress, detail);
+                var (status, detail) = await InstallWithRetryAsync(item, prepared, ct);
+                Report(item, status, progress, detail);
+            }
+        }
+        finally
+        {
+            // A cancelled run can leave the next item's prefetch in flight — wait for it and
+            // clean up its temp folder so cancellation doesn't leak a half-copied installer.
+            if (nextPrepare is not null)
+            {
+                try { TryDeleteDirectory((await nextPrepare).TempDir); }
+                catch (OperationCanceledException) { /* its temp dir was already cleaned up */ }
+            }
         }
     }
 
@@ -149,6 +189,11 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             var msiLogPath = isMsi ? Path.Combine(tempDir, "msiexec.log") : null;
             return new PrepareOutcome { TempDir = tempDir, LocalPath = localPath, MsiLogPath = msiLogPath };
         }
+        catch (OperationCanceledException)
+        {
+            TryDeleteDirectory(tempDir);
+            throw;
+        }
         catch (Exception ex)
         {
             logger?.WriteLine($"[{item.Name}] Fout tijdens kopiëren: {ex.Message}");
@@ -194,6 +239,11 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
 
             return (ItemStatus.Failed, error);
         }
+        catch (OperationCanceledException)
+        {
+            logger?.WriteLine($"[{item.Name}] Installatie geannuleerd — het installerproces draait mogelijk nog door.");
+            throw;
+        }
         catch (Exception ex)
         {
             logger?.WriteLine($"[{item.Name}] Fout tijdens installatie: {ex.Message}");
@@ -237,6 +287,11 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             stopwatch.Stop();
             logger?.WriteLine($"[{item.Name}] Instelling toegepast in {stopwatch.Elapsed.TotalMilliseconds:N0}ms.");
             Report(item, ItemStatus.Succeeded, progress);
+        }
+        catch (OperationCanceledException)
+        {
+            Report(item, ItemStatus.Failed, progress, "Geannuleerd");
+            throw;
         }
         catch (Exception ex)
         {

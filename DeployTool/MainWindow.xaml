@@ -230,8 +230,13 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" VerticalAlignment="Center"
                            Foreground="{StaticResource TextSecondaryBrush}"/>
-                <Button Grid.Column="1" Content="Start installatie" Style="{StaticResource PrimaryButton}"
-                        Command="{Binding StartCommand}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="Annuleren" Style="{StaticResource GhostButton}" Margin="0,0,8,0"
+                            Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}"
+                            Command="{Binding CancelSessionCommand}"/>
+                    <Button Content="Start installatie" Style="{StaticResource PrimaryButton}"
+                            Command="{Binding StartCommand}"/>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>
