@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 
 namespace DeployTool.Core.Services;
@@ -8,6 +9,7 @@ public sealed class FileServerConnector
     private const int ResourcetypeDisk = 1;
     private const int NoError = 0;
     private const int ErrorAlreadyAssigned = 85;
+    private const int ErrorSessionCredentialConflict = 1219;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NetResource
@@ -39,7 +41,12 @@ public sealed class FileServerConnector
         var result = WNetAddConnection2(ref resource, "", "klant", 0);
         if (result != NoError && result != ErrorAlreadyAssigned)
         {
-            throw new IOException($"Kan geen verbinding maken met fileserver '{uncPath}' (foutcode {result}).");
+            // Win32Exception turns the raw error code into the OS-localized description.
+            var detail = new Win32Exception(result).Message;
+            if (result == ErrorSessionCredentialConflict)
+                detail += " Deze pc heeft al een verbinding met deze server onder een andere login — verbreek die eerst (bv. via 'net use * /delete') of herstart de pc.";
+
+            throw new IOException($"Kan geen verbinding maken met fileserver '{uncPath}' (foutcode {result}): {detail}");
         }
     }
 }

@@ -192,6 +192,17 @@
             </StackPanel>
         </ScrollViewer>
 
+        <!-- Load failed: overlay with retry, e.g. when the share is unreachable at startup -->
+        <Grid Grid.Row="1" Background="{StaticResource WindowBackgroundBrush}"
+              Visibility="{Binding LoadFailed, Converter={StaticResource BoolToVisibility}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560">
+                <TextBlock Text="{Binding StatusMessage}" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}"
+                           TextWrapping="Wrap" TextAlignment="Center"/>
+                <Button Content="Opnieuw proberen" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center"
+                        Margin="0,14,0,0" Command="{Binding ReloadCommand}"/>
+            </StackPanel>
+        </Grid>
+
         <!-- Live log -->
         <Border Grid.Row="2" Background="{StaticResource TerminalBackgroundBrush}" Margin="24,0,24,12" CornerRadius="12" Padding="0">
             <DockPanel>

@@ -50,6 +50,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private string statusMessage = "Verbinden met fileserver...";
 
+    /// <summary>True when the initial load (connect + discover) failed — shows the retry overlay.</summary>
+    [ObservableProperty]
+    private bool loadFailed;
+
     public MainViewModel(string shareRoot)
     {
         _layout = new ShareLayout(shareRoot);
@@ -65,6 +69,7 @@ public partial class MainViewModel : ObservableObject
     public async Task LoadAsync()
     {
         IsLoading = true;
+        LoadFailed = false;
         var previousSelections = AllItems.ToDictionary(GetStableKey, i => i.IsSelected);
         try
         {
@@ -152,12 +157,16 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusMessage = $"Fout bij laden: {ex.Message}";
+            LoadFailed = true;
         }
         finally
         {
             IsLoading = false;
         }
     }
+
+    [RelayCommand]
+    private Task ReloadAsync() => LoadAsync();
 
     private static string GetStableKey(SessionItemViewModel vm) => vm.Kind switch
     {
