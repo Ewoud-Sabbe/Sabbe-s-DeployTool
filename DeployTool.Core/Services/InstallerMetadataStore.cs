@@ -11,8 +11,9 @@ public sealed class InstallerMetadataStore(ShareLayout layout)
 
     public async Task<List<InstallerDefinition>> LoadAsync(CancellationToken ct = default)
     {
-        if (!File.Exists(layout.InstallersJsonPath)) return [];
-        var json = await Task.Run(() => File.ReadAllText(layout.InstallersJsonPath), ct);
+        // File.Exists on the share is a network call too — keep it off the calling (UI) thread.
+        var json = await Task.Run(() => File.Exists(layout.InstallersJsonPath) ? File.ReadAllText(layout.InstallersJsonPath) : null, ct);
+        if (json is null) return [];
         return Serializer.Deserialize<List<InstallerDefinition>>(json) ?? [];
     }
 

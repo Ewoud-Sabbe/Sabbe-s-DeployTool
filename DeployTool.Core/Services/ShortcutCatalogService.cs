@@ -7,11 +7,12 @@ public sealed class ShortcutCatalogService(ShareLayout layout)
 {
     private static readonly string[] Extensions = [".url", ".lnk", ".exe"];
 
-    public Task<List<ShortcutCatalogEntry>> DiscoverAsync(CancellationToken ct = default)
+    // Directory check + enumeration hit the network share — keep them off the calling (UI) thread.
+    public Task<List<ShortcutCatalogEntry>> DiscoverAsync(CancellationToken ct = default) => Task.Run(() =>
     {
-        if (!Directory.Exists(layout.ShortcutsDir)) return Task.FromResult(new List<ShortcutCatalogEntry>());
+        if (!Directory.Exists(layout.ShortcutsDir)) return new List<ShortcutCatalogEntry>();
 
-        var entries = Directory.EnumerateFiles(layout.ShortcutsDir)
+        return Directory.EnumerateFiles(layout.ShortcutsDir)
             .Where(f => Extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
             .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
             .Select(f => new ShortcutCatalogEntry
@@ -21,7 +22,5 @@ public sealed class ShortcutCatalogService(ShareLayout layout)
                 DisplayName = Path.GetFileNameWithoutExtension(f)
             })
             .ToList();
-
-        return Task.FromResult(entries);
-    }
+    }, ct);
 }

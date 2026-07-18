@@ -127,8 +127,11 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             var isMsi = Path.GetExtension(installer.FileName).Equals(".msi", StringComparison.OrdinalIgnoreCase);
 
             // Check before copying: no point pulling a multi-GB installer over the network
-            // just to find out it's already installed.
-            if (TryGetAlreadyInstalledMessage(installer.FullPath, isMsi, installer.DisplayName) is { } alreadyInstalledMessage)
+            // just to find out it's already installed. On a background thread: the ProductCode
+            // check opens the .msi in place on the share (MsiOpenPackageW), which would otherwise
+            // block the calling (UI) thread for seconds on a slow network.
+            var alreadyInstalled = await Task.Run(() => TryGetAlreadyInstalledMessage(installer.FullPath, isMsi, installer.DisplayName), ct);
+            if (alreadyInstalled is { } alreadyInstalledMessage)
             {
                 logger?.WriteLine($"[{item.Name}] {alreadyInstalledMessage}");
                 return new PrepareOutcome { TempDir = tempDir, Completed = (ItemStatus.AlreadyInstalled, alreadyInstalledMessage) };

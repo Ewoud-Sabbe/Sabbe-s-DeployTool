@@ -36,7 +36,9 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
                 if (File.Exists(mccleanupSource))
                 {
                     var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
-                    CopyDirectory(mccleanupSourceDir, localDir);
+                    // Background thread: this copies the whole McCleanup folder over the network,
+                    // which would otherwise freeze the UI until the first await below.
+                    await Task.Run(() => CopyDirectory(mccleanupSourceDir, localDir), ct);
                     var localMccleanup = Path.Combine(localDir, "mccleanup.exe");
 
                     // Exact same component list McAfee's own StartCleanup.bat passes to McClnUI.exe.

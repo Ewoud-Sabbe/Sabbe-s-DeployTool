@@ -14,8 +14,9 @@ public sealed class ItemDefaultsStore(ShareLayout layout)
 
     public async Task<Dictionary<string, bool>> LoadAsync(CancellationToken ct = default)
     {
-        if (!File.Exists(layout.ItemDefaultsJsonPath)) return [];
-        var json = await Task.Run(() => File.ReadAllText(layout.ItemDefaultsJsonPath), ct);
+        // File.Exists on the share is a network call too — keep it off the calling (UI) thread.
+        var json = await Task.Run(() => File.Exists(layout.ItemDefaultsJsonPath) ? File.ReadAllText(layout.ItemDefaultsJsonPath) : null, ct);
+        if (json is null) return [];
         return Serializer.Deserialize<Dictionary<string, bool>>(json) ?? [];
     }
 

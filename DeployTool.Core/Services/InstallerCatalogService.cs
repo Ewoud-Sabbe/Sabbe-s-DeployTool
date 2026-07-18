@@ -9,14 +9,16 @@ public sealed class InstallerCatalogService(ShareLayout layout, InstallerMetadat
 
     public async Task<List<InstallerCatalogEntry>> DiscoverAsync(CancellationToken ct = default)
     {
-        if (!Directory.Exists(layout.InstallersDir)) return [];
-
         var definitions = await metadataStore.LoadAsync(ct);
         var byFileName = definitions.ToDictionary(d => d.FileName, StringComparer.OrdinalIgnoreCase);
 
-        var files = Directory.EnumerateFiles(layout.InstallersDir)
-            .Where(f => Extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
-            .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase);
+        // Directory check + enumeration hit the network share — keep them off the calling (UI) thread.
+        var files = await Task.Run(() => !Directory.Exists(layout.InstallersDir)
+            ? new List<string>()
+            : Directory.EnumerateFiles(layout.InstallersDir)
+                .Where(f => Extensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+                .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .ToList(), ct);
 
         var result = new List<InstallerCatalogEntry>();
         foreach (var file in files)
