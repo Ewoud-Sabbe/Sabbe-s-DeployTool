@@ -1,7 +1,8 @@
 using DeployTool.Core.Models;
 using DeployTool.Core.Services;
 
-var root = args.Length > 0 ? args[0] : @"S:\deploy map";
+var run = args.Contains("--run");
+var root = args.FirstOrDefault(a => a != "--run") ?? @"S:\deploy map";
 Console.WriteLine($"Fileserver root: {root}");
 
 var layout = new ShareLayout(root);
@@ -33,6 +34,15 @@ var bloatware = bloatwareCatalog.GetAll();
 Console.WriteLine($"\nBloatware ({bloatware.Count}):");
 foreach (var b in bloatware)
     Console.WriteLine($"  {b.Name} default={b.DefaultSelected}");
+
+// Discovery-only by default: actually running the session executes every setting and
+// bloatware removal on THIS machine (power settings, time resync, McAfee/NordVPN uninstall...).
+if (!run)
+{
+    Console.WriteLine("\nDiscovery klaar. Voeg --run toe om de sessie ook echt uit te voeren");
+    Console.WriteLine("(let op: dat past alle instellingen toe en verwijdert bloatware op deze pc).");
+    return;
+}
 
 // Build a session: only configured installers + all shortcuts + all settings, all selected.
 var sessionItems = new List<SessionItem>();

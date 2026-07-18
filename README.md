@@ -86,8 +86,12 @@ Wijzigingen in standaardselectie gelden pas bij een volgende (verse) keer opstar
 ```powershell
 dotnet build DeployTool.slnx
 
-# Core-logica testen zonder UI, tegen een lokale testmap:
+# Core-logica testen zonder UI, tegen een lokale testmap (standaard alleen discovery):
 dotnet run --project DeployTool.TestHarness\DeployTool.TestHarness.csproj -- "C:\pad\naar\testshare"
+
+# De sessie ook echt uitvoeren — let op: dit past alle instellingen toe en
+# verwijdert bloatware op de pc waarop je de harness draait:
+dotnet run --project DeployTool.TestHarness\DeployTool.TestHarness.csproj -- "C:\pad\naar\testshare" --run
 
 # App draaien met een andere share dan de standaard:
 $env:DEPLOYTOOL_SHARE_ROOT = "C:\pad\naar\testshare"
