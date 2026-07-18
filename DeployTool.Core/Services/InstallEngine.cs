@@ -353,6 +353,12 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     {
         if (Path.GetExtension(localPath).Equals(".msi", StringComparison.OrdinalIgnoreCase))
         {
+            // Under /qn, msiexec reboots the machine *automatically* when a package asks for it —
+            // mid-session, unattended. /norestart suppresses that; the install then returns 3010
+            // ("success, reboot required"), which is already treated as success above.
+            if (silentArgs.IndexOf("/norestart", StringComparison.OrdinalIgnoreCase) < 0)
+                silentArgs = $"{silentArgs} /norestart".TrimStart();
+
             var args = msiLogPath is null
                 ? $"/i \"{localPath}\" {silentArgs}".TrimEnd()
                 : $"/i \"{localPath}\" {silentArgs} /l*v \"{msiLogPath}\"".TrimEnd();
