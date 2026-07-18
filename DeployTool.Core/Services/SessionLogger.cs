@@ -36,10 +36,28 @@ public sealed class SessionLogger : IDisposable
     {
         lock (_lock)
         {
-            _writer.WriteLine(line);
+            try
+            {
+                _writer.WriteLine(line);
+            }
+            catch
+            {
+                // The log lives on the share (AutoFlush) — a network hiccup here must not fail
+                // the install step that happened to log it. The live UI mirror still gets the line.
+            }
         }
         LineWritten?.Invoke(line);
     }
 
-    public void Dispose() => _writer.Dispose();
+    public void Dispose()
+    {
+        try
+        {
+            _writer.Dispose();
+        }
+        catch
+        {
+            // Flushing to a dropped share connection shouldn't crash shutdown.
+        }
+    }
 }
