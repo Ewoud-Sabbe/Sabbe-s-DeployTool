@@ -113,3 +113,9 @@ De app target .NET Framework 4.8, dat standaard met Windows 10/11 meegeleverd wo
 - **Live in de app**: een donker logpaneel onderaan het scherm, elke regel verschijnt zodra ze geschreven wordt.
 - **Bestand**: `Logs\{computernaam}_{tijdstip}.log` op de share — timestamps op de milliseconde, kopieertijd/-grootte, volledige commandline van elke installer, exitcodes, retry-redenering.
 - **MSI-fouten**: bij een mislukte `.msi`-installatie wordt het volledige `msiexec`-verbose-log bewaard naast het sessielog, voor verdere troubleshooting.
+
+## Bekende beperkingen
+
+- **Gelijktijdige configuratie-wijzigingen**: `installers.json` en `item-defaults.json` worden zonder locking gelezen-en-teruggeschreven. Slaan twee pc's tegelijk een wijziging op, dan wint de laatste schrijver en gaat de andere wijziging verloren. In de praktijk geen probleem zolang je de configuratie vanaf één werkpost beheert; de sessies zelf (installeren/uitvoeren) hebben hier geen last van.
+- **Elevatie en gebruikersprofiel**: de app draait verhoogd (UAC). HKCU-instellingen (printer, bureaubladpictogrammen, NumLock) en bureaublad-snelkoppelingen landen in het profiel van het account waarmee de elevatie gebeurde. Op een verse pc waar de ingelogde gebruiker zelf administrator is, is dat hetzelfde account — maar wie eleveert met een *ander* admin-account, zet die instellingen in het verkeerde profiel.
+- **Annuleren kilt geen lopende (un)installer**: de Annuleren-knop stopt het wachten en de rest van de sessie, maar laat een al gestart installatie-/verwijderproces bewust uitlopen — een halverwege afgebroken MSI-installatie is riskanter dan ze laten afwerken.
