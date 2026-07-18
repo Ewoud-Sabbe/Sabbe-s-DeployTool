@@ -330,7 +330,8 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         return null;
     }
 
-    /// <summary>Loosely matches a configured display name against installed programs (both registry bitness views + HKCU).</summary>
+    /// <summary>Matches a configured display name against installed programs (both registry bitness views + HKCU),
+    /// comparing whole words so "Office" doesn't match "LibreOffice".</summary>
     private static string? TryFindInstalledDisplayName(string displayName)
     {
         var hint = NormalizeProgramName(displayName);
@@ -356,12 +357,35 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
                     continue;
 
                 var normalizedInstalled = NormalizeProgramName(installedName);
-                if (normalizedInstalled.Length > 0 && (normalizedInstalled.Contains(hint) || hint.Contains(normalizedInstalled)))
+                if (normalizedInstalled.Length > 0 && ProgramNamesMatch(hint, normalizedInstalled))
                     return installedName;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True when the shorter name's words all appear, in order, in the longer name's words.
+    /// Substring matching was too loose here: "office" is contained in "libreoffice", which made
+    /// a configured "Office" report LibreOffice machines as already installed. Word-level matching
+    /// still links "Teams" to "Microsoft Teams" and "Adobe Reader" to "Adobe Acrobat Reader DC".
+    /// </summary>
+    private static bool ProgramNamesMatch(string normalizedA, string normalizedB)
+    {
+        var a = normalizedA.Split(' ');
+        var b = normalizedB.Split(' ');
+        var (shorter, longer) = a.Length <= b.Length ? (a, b) : (b, a);
+
+        var pos = 0;
+        foreach (var word in shorter)
+        {
+            pos = Array.IndexOf(longer, word, pos);
+            if (pos < 0) return false;
+            pos++;
+        }
+
+        return true;
     }
 
     /// <summary>Lowercases and strips version numbers / "(64-bit)"-style suffixes so names compare sensibly.</summary>
