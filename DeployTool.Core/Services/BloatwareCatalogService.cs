@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DeployTool.Core.Models;
 using DeployTool.Core.Polyfills;
-using Microsoft.Win32;
 
 namespace DeployTool.Core.Services;
 
@@ -17,7 +16,7 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
             DefaultSelected = true,
             Execute = async ct =>
             {
-                var installed = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                var installed = UninstallRegistry.FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
                 if (installed.Count == 0) return;
 
                 // McAfee's own per-product uninstallers (LiveSafe, WebAdvisor, Safe Connect, ...)
@@ -38,7 +37,7 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
                     var localDir = Path.Combine(Path.GetTempPath(), "PCSetup", "McCleanup");
                     // Background thread: this copies the whole McCleanup folder over the network,
                     // which would otherwise freeze the UI until the first await below.
-                    await Task.Run(() => CopyDirectory(mccleanupSourceDir, localDir), ct);
+                    await Task.Run(() => FileSystemHelpers.CopyDirectory(mccleanupSourceDir, localDir), ct);
                     var localMccleanup = Path.Combine(localDir, "mccleanup.exe");
 
                     // Exact same component list McAfee's own StartCleanup.bat passes to McClnUI.exe.
@@ -57,7 +56,7 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
                     }
                     finally
                     {
-                        TryDeleteDirectory(localDir);
+                        FileSystemHelpers.TryDeleteDirectory(localDir);
                     }
                 }
 
@@ -67,7 +66,7 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
                 // to be watching and can just click through it rather than having to go hunt McAfee
                 // down manually afterwards. UninstallProgramAsync's timeout keeps a genuinely stuck
                 // uninstaller from blocking the rest of the session indefinitely either way.
-                var stillPresent = FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
+                var stillPresent = UninstallRegistry.FindInstalledPrograms(name => name.IndexOf("mcafee", StringComparison.OrdinalIgnoreCase) >= 0);
                 var failures = new List<string>();
                 foreach (var program in stillPresent)
                 {
@@ -92,7 +91,7 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
             DefaultSelected = true,
             Execute = async ct =>
             {
-                var matches = FindInstalledPrograms(name => name.IndexOf("nordvpn", StringComparison.OrdinalIgnoreCase) >= 0);
+                var matches = UninstallRegistry.FindInstalledPrograms(name => name.IndexOf("nordvpn", StringComparison.OrdinalIgnoreCase) >= 0);
 
                 var failures = new List<string>();
                 foreach (var program in matches)
@@ -113,45 +112,6 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
             }
         },
     ];
-
-    private sealed record InstalledProgram(string DisplayName, string? UninstallString, string? QuietUninstallString);
-
-    /// <summary>Scans the Uninstall registry (both bitness views + HKCU) for entries whose DisplayName matches.
-    /// A single vendor — McAfee especially — can register several separate entries.</summary>
-    private static List<InstalledProgram> FindInstalledPrograms(Func<string, bool> nameMatches)
-    {
-        var results = new List<InstalledProgram>();
-
-        (RegistryHive Hive, RegistryView View)[] locations =
-        [
-            (RegistryHive.LocalMachine, RegistryView.Registry64),
-            (RegistryHive.LocalMachine, RegistryView.Registry32),
-            (RegistryHive.CurrentUser, RegistryView.Registry64),
-        ];
-
-        foreach (var (hive, view) in locations)
-        {
-            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-            using var uninstallKey = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
-            if (uninstallKey is null) continue;
-
-            foreach (var subKeyName in uninstallKey.GetSubKeyNames())
-            {
-                using var subKey = uninstallKey.OpenSubKey(subKeyName);
-                if (subKey?.GetValue("DisplayName") is not string displayName || string.IsNullOrWhiteSpace(displayName))
-                    continue;
-
-                if (!nameMatches(displayName)) continue;
-
-                results.Add(new InstalledProgram(
-                    displayName,
-                    subKey.GetValue("UninstallString") as string,
-                    subKey.GetValue("QuietUninstallString") as string));
-            }
-        }
-
-        return results;
-    }
 
     /// <summary>
     /// Runs the program's own registered uninstaller silently. Vendor uninstallers report success
@@ -205,7 +165,7 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
         // for someone to actually click through a wizard if they're sitting there watching.
         await WaitForExitWithTimeoutAsync(process, TimeSpan.FromMinutes(5), ct);
 
-        var stillPresent = FindInstalledPrograms(n => string.Equals(n, program.DisplayName, StringComparison.OrdinalIgnoreCase)).Count > 0;
+        var stillPresent = UninstallRegistry.FindInstalledPrograms(n => string.Equals(n, program.DisplayName, StringComparison.OrdinalIgnoreCase)).Count > 0;
         if (stillPresent)
             throw new InvalidOperationException($"nog steeds aanwezig na uninstall-poging (exitcode {process.ExitCode}, commando: \"{fileName}\" {arguments}).");
     }
@@ -224,31 +184,6 @@ public sealed class BloatwareCatalogService(ShareLayout layout)
 
         var spaceIndex = command.IndexOf(' ');
         return spaceIndex < 0 ? (command, string.Empty) : (command[..spaceIndex], command[(spaceIndex + 1)..].Trim());
-    }
-
-    private static void CopyDirectory(string sourceDir, string destinationDir)
-    {
-        Directory.CreateDirectory(destinationDir);
-        var sourceRoot = sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = file.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var destFile = Path.Combine(destinationDir, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destFile)!);
-            File.Copy(file, destFile, overwrite: true);
-        }
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup — a locked file here shouldn't fail the session
-        }
     }
 
     /// <summary>Waits for a process to exit, but gives up after <paramref name="timeout"/> instead

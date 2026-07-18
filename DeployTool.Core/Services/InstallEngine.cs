@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using DeployTool.Core.Models;
 using DeployTool.Core.Polyfills;
-using Microsoft.Win32;
 
 namespace DeployTool.Core.Services;
 
@@ -63,7 +62,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             // so its temp folder doesn't leak. (When it was consumed, this is a no-op.)
             if (firstPrepare is not null)
             {
-                try { TryDeleteDirectory((await firstPrepare).TempDir); }
+                try { FileSystemHelpers.TryDeleteDirectory((await firstPrepare).TempDir); }
                 catch (OperationCanceledException) { /* its temp dir was already cleaned up */ }
             }
 
@@ -132,7 +131,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
             // clean up its temp folder so cancellation doesn't leak a half-copied installer.
             if (nextPrepare is not null)
             {
-                try { TryDeleteDirectory((await nextPrepare).TempDir); }
+                try { FileSystemHelpers.TryDeleteDirectory((await nextPrepare).TempDir); }
                 catch (OperationCanceledException) { /* its temp dir was already cleaned up */ }
             }
         }
@@ -206,7 +205,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         }
         catch (OperationCanceledException)
         {
-            TryDeleteDirectory(tempDir);
+            FileSystemHelpers.TryDeleteDirectory(tempDir);
             throw;
         }
         catch (Exception ex)
@@ -221,7 +220,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
     {
         if (prepared.Completed is { } completed)
         {
-            TryDeleteDirectory(prepared.TempDir);
+            FileSystemHelpers.TryDeleteDirectory(prepared.TempDir);
             return completed;
         }
 
@@ -266,7 +265,7 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         }
         finally
         {
-            TryDeleteDirectory(prepared.TempDir);
+            FileSystemHelpers.TryDeleteDirectory(prepared.TempDir);
             logger?.WriteLine($"[{item.Name}] Tijdelijke map opgeruimd: \"{prepared.TempDir}\"");
         }
     }
@@ -351,32 +350,11 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         var hint = NormalizeProgramName(displayName);
         if (hint.Length == 0) return null;
 
-        (RegistryHive Hive, RegistryView View)[] locations =
-        [
-            (RegistryHive.LocalMachine, RegistryView.Registry64),
-            (RegistryHive.LocalMachine, RegistryView.Registry32),
-            (RegistryHive.CurrentUser, RegistryView.Registry64),
-        ];
-
-        foreach (var (hive, view) in locations)
+        return UninstallRegistry.FindInstalledPrograms(installedName =>
         {
-            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-            using var uninstallKey = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall");
-            if (uninstallKey is null) continue;
-
-            foreach (var subKeyName in uninstallKey.GetSubKeyNames())
-            {
-                using var subKey = uninstallKey.OpenSubKey(subKeyName);
-                if (subKey?.GetValue("DisplayName") is not string installedName || string.IsNullOrWhiteSpace(installedName))
-                    continue;
-
-                var normalizedInstalled = NormalizeProgramName(installedName);
-                if (normalizedInstalled.Length > 0 && ProgramNamesMatch(hint, normalizedInstalled))
-                    return installedName;
-            }
-        }
-
-        return null;
+            var normalizedInstalled = NormalizeProgramName(installedName);
+            return normalizedInstalled.Length > 0 && ProgramNamesMatch(hint, normalizedInstalled);
+        }).FirstOrDefault()?.DisplayName;
     }
 
     /// <summary>
@@ -503,17 +481,5 @@ public sealed class InstallEngine(ShortcutPlacementService shortcutPlacer, Sessi
         using var src = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
         using var dst = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
         await src.CopyToAsync(dst, 81920, ct);
-    }
-
-    private static void TryDeleteDirectory(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch
-        {
-            // best-effort cleanup — a locked file here shouldn't fail the session
-        }
     }
 }
